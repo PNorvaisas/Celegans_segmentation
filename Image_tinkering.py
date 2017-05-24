@@ -23,6 +23,11 @@ from skimage.util import img_as_ubyte
 from skimage.morphology import disk, opening, dilation, square
 from skimage import exposure
 
+
+import tifffile as tiff
+
+import textwrap as tw
+
 import csv
 
 def filename(ifile):
@@ -49,69 +54,149 @@ def filename(ifile):
 
 
 def thresholding(file,thresholds,sizes):
-	#file = '20170503/image_011.tif'
-	image = skio.imread(file)
+    #file = '20170503/image_011.tif'
+    #Changed from skio.imread, which could not handle 16bit TIFF
+    image = tiff.imread(file)
 
-	vo_size,vd_size,ho_size,hd_size=sizes
-	vmin,vmax,hmin,hmax=thresholds
-	#image.shape
-	#image.dtype
-	imghsv=color.rgb2hsv(image)
+    vo_size,vd_size,ho_size,hd_size=sizes
+    
+    vmin,vmax,hmin,hmax=thresholds
+    #image.shape
+    #image.dtype
+    imghsv=color.rgb2hsv(image)
+    
+    imgrgb=color.hsv2rgb(imghsv)
 
-	h =imghsv[:,:,0]
-	#s =imghsv[:,:,1]
-	v =imghsv[:,:,2]
+    h =imghsv[:,:,0]
+    #s =imghsv[:,:,1]
+    v =imghsv[:,:,2]
 
-	vmask = (v > vmin).astype(np.uint8);  # Thresholding in the Brightness
-	vmask = (vmask< vmax).astype(np.uint8);
+    vmask = (v > vmin).astype(np.uint8);  # Thresholding in the Brightness
+    vmask = (vmask< vmax).astype(np.uint8);
 
-	disk_oelem = disk(vo_size) # Remove small regions
-	disk_delem = disk(vd_size) # Join regions
-	vopened = opening(vmask, selem=disk_oelem)
-	vdilated = dilation(vopened, selem=disk_delem)
+    disk_oelem = disk(vo_size) # Remove small regions
+    disk_delem = disk(vd_size) # Join regions
+    vopened = opening(vmask, selem=disk_oelem)
+    vdilated = dilation(vopened, selem=disk_delem)
 
-	#plt.imshow(vopened); plt.title('Brightness mask')
-	#plt.imshow(vdilated); plt.title('Brightness mask')
+    #plt.imshow(vopened); plt.title('Brightness mask')
+    #plt.imshow(vdilated); plt.title('Brightness mask')
+    hmask = (h > hmin).astype(np.uint8);  # Thresholding in the Hue-channel
+    hmask = (hmask< hmax).astype(np.uint8);
 
-	hmask = (h > hmin).astype(np.uint8);  # Thresholding in the Hue-channel
-	hmask = (hmask< hmax).astype(np.uint8);
+    disk_oelem = disk(ho_size) # Remove small regions
+    disk_delem = disk(hd_size) # Remove small regions
+    hopened = opening(hmask, selem=disk_oelem)
+    hdilated = dilation(hopened, selem=disk_delem)
 
-	disk_oelem = disk(ho_size) # Remove small regions
-	disk_delem = disk(hd_size) # Remove small regions
-	hopened = opening(hmask, selem=disk_oelem)
-	hdilated = dilation(hopened, selem=disk_delem)
+    #plt.imshow(hopened); plt.title('Hue mask')
+    #plt.imshow(hdilated); plt.title('Hue mask')
 
-	#plt.imshow(hopened); plt.title('Hue mask')
-	#plt.imshow(hdilated); plt.title('Hue mask')
+    img2 = imghsv.copy()
+    img2[hdilated.astype(bool), :] = 0; # Set the pixels to zero by Hue mask
+    img2[vdilated.astype(bool), :] = 0; # Set the pixels to zero by Lightness mask
 
-	img2 = imghsv.copy()
-	img2[hdilated.astype(bool), :] = 0; # Set the pixels to zero by Hue mask
-	img2[vdilated.astype(bool), :] = 0; # Set the pixels to zero by Lightness mask
+    img2rgb=color.hsv2rgb(img2)
 
-	img2rgb=color.hsv2rgb(img2)
-
-
-	return image,vdilated,hdilated,img2,img2rgb
+    return image,imgrgb,vdilated,hdilated,img2,img2rgb
 
 
+def slice_list(input, size):
+    input_size = len(input)
+    slice_size = input_size / size
+    remain = input_size % size
+    result = []
+    iterator = iter(input)
+    for i in range(size):
+        result.append([])
+        for j in range(slice_size):
+            result[i].append(iterator.next())
+        if remain:
+            result[i].append(iterator.next())
+            remain -= 1
+    return result
+
+class NestedDict(dict):
+	def __getitem__(self, key):         
+		if key in self: return self.get(key)
+		return self.setdefault(key, NestedDict())
+
+def numerize(s):
+	try:
+		if s=='NAN':
+			return s
+		float(s)
+		if float(s).is_integer():
+			return int(float(s))
+		elif float(s)==0:
+			return float(s)
+		else:
+			return float(s)
+
+	except ValueError:
+		return s
+    
+def indx2well(ind,start=0,rowln=12):
+    
+    indt=ind-start
+    rows=['A','B','C','D','E','F','G','H']
+    row=indt//rowln
+    col=indt-row*rowln+1
+    well='{}{}'.format(rows[row],col)
+    return well
 
 
-os.chdir("/users/povilas/Dropbox/Projects/2015-Metformin/Worm_imaging/Trial images")
+def readmet(ifile):
+	print ifile
+	nutrients=NestedDict()
+
+	rdr=csv.reader(open(ifile,'r'), delimiter=',')
+	data=[ln for ln in rdr]
+	headers=data[0]
+	headin={ hd : headers.index(hd) for hd in headers}
+	nec=['Metabolite','EcoCycID','Plate','Well','Index']
+	if all(n in headers for n in nec):
+		print 'Necessary headers found!'
+	else:
+		print 'Missing essential headers in metabolites file!'
+		print headers
+		sys.exit(0)
+	for ln in data[1:]:
+		pl=str(numerize(ln[headin['Plate']])).strip().encode('ascii','ignore')
+		wl=str(numerize(ln[headin['Well']])).strip().encode('ascii','ignore')
+		for hd in headin.keys():
+			nutrients[pl][wl][hd]=str(numerize(ln[headin[hd]])).strip().encode('ascii','ignore')
+	return nutrients
+
+
+
+
+
+
+
+os.chdir("/users/povilas/Dropbox/Projects/2015-Metformin/Worm_imaging")
 matplotlib.rcParams.update({'font.size': 12})
 
+sourceloc="/Users/Povilas/Dropbox/Projects/Biolog_Celegans_Metformin"
+replicate="Rep1"
+plate="PM1"
 
+odir='Metformin_Biolog_Celegans_Screen_results'
 
+nutrients=readmet('/Users/Povilas/Dropbox/Projects/2015-Metformin/Biolog/Biolog_metabolites_EcoCyc.csv')
 #Analyse multiple images
+#thresholds=[0.05,1,0.355,0.4]
+#sizes=[3,1,3,1]
 
 
-thresholds=[0.05,1,0.355,0.4]
+thresholds=[0.02,1,0.355,0.4]
 sizes=[3,1,3,1]
 
 
-odir='20170503_analysis'
 
-minimage=9
-maximage=11
+
+minimage=1
+maximage=96
 maxpix=0
 data=[]
 
@@ -119,12 +204,18 @@ plot=True
 saveimg=True
 
 
-files=["image_{}.tif".format(str(im).zfill(3)) for im in range(minimage,maximage+1)]
+files=["PM1_{}.tif".format(str(im).zfill(3)) for im in range(minimage,maximage+1)]
+
+
+
+
+rowslices=slice_list(files,8) #Slice list to 8 row slices
+
 
 for file in files:
 	fpat, fname, ftype = filename(file)
 	print file
-	location = "20170503/{}".format(file)
+	location = "{}/{}/{}/{}".format(sourceloc,replicate,plate,file)
 
 	image,vdilated,hdilated,img2hsv,img2rgb=thresholding(location,thresholds,sizes)
 
@@ -162,7 +253,7 @@ for file in files:
 
 		fig.tight_layout()
 		if saveimg:
-			fig.savefig('{}/{}_analysis.pdf'.format(odir,fname), bbox_inches='tight')
+			fig.savefig('{}/{}_{}_analysis.pdf'.format(odir,replicate,fname), bbox_inches='tight')
 		plt.close(fig)
 
 	bright1D=[el for el in list(v2.ravel()) if el>0]
@@ -180,7 +271,7 @@ data.insert(0,header)
 
 
 
-f=open('20170503_analysis/Summary.csv',"wb")
+f=open('{}/Summary.csv'.format(odir),"wb")
 ofile=csv.writer(f, delimiter='\t') # dialect='excel',delimiter=';', quotechar='"', quoting=csv.QUOTE_ALL
 for row in data:
 	#row = [item.encode("utf-8") if isinstance(item, unicode) else str(item) for item in row]
@@ -192,95 +283,249 @@ f.close()
 
 
 
-#Test parameters
-odir='20170503_parameters'
+
+#==============================================================================
+# #@#Test parameters
+#==============================================================================
+
+#
+#odir='2017-05-17_Trial_analysis2'
+#
+#sourceloc="2017-05-17_Trial"
 
 thresholds=[0.05,1,0.355,0.4]
 sizes=[3,1,3,1]
 
+hstep=0.005
+hmin=0.34
+hmax=0.375
 
-hstep=0.01
-hmin=0.3
-hmax=0.4
-
-bstep=0.01
-bmin=0.04
-bmax=0.07
-
+bstep=0.0025
+bmin=0.01
+bmax=0.03
 
 hues=np.arange(hmin,hmax+hstep,hstep)
 brights=np.arange(bmin,bmax+bstep,bstep)
 
+totalf=len(brights)*len(hues)
 
 
+#files=["image_{}.tif".format(str(im).zfill(3)) for im in range(minimage,maximage+1)]
 
-minimage=9
-maximage=9
-maxpix=0
+replicate="Rep1"
+plate="PM1"
+#imid=33
 
 
-total=len(brights)*len(hues)
-files=["image_{}.tif".format(str(im).zfill(3)) for im in range(minimage,maximage+1)]
+#files=["{}_{}.tif".format(plate,str(im).zfill(3)) for im in range(minimage,maximage+1)]
+
+files=["{}_{}.tif".format(plate,str(imid).zfill(3)) for imid in [1,2,9,15,18,28,33,35,61]]
 
 data=[]
-for file in files:
-	fpat, fname, ftype = filename(file)
-	print file
-	location = "20170503/{}".format(file)
 
-	fig, axes = plt.subplots(nrows=len(brights), ncols=len(hues),sharex=True, sharey=True, figsize=(24,12), dpi=100)
-	fig.suptitle(fname)
+sizei=sizes
 
-	#plt.subplots_adjust(left=0.1, bottom=0.1, right=0.95, top=0.5, wspace=0, hspace=0)
-
-	ind=0.0
-	for bi, bval in enumerate(brights):
-		for hi,hval in enumerate(hues):
-			ind=ind+1.0
-			thresi=thresholds
-			thresi[0]=bval
-			thresi[2]=hval
-			image,vdilated,hdilated,img2hsv,img2rgb=thresholding(location,thresi,sizes)
-
-			plt.sca(axes[bi, hi]);ax = axes[bi, hi]
-			plt.imshow(img2hsv)
-			plt.setp(ax.get_yticklabels(), visible=False)
-			plt.setp(ax.get_xticklabels(), visible=False)
-
-			if hi == 0:
-				ax.yaxis.set_label_position("left")
-				plt.ylabel(bval, rotation='horizontal')
-			if bi == 0:
-				plt.title(hval)
+size_v_opening=[3]
+size_v_dilation=[1]
+size_h_opening=[3]
+size_h_dilation=[1]
 
 
-			prc=ind*100.0/total
-			print '{:}:{:6.1f}%'.format(fname,prc)
+overall=len(files)*totalf*len(size_v_opening)*len(size_v_dilation)*len(size_h_opening)*len(size_h_dilation)
+print overall
 
-	#fig.tight_layout()
-	fig.savefig('{}/{}_parameters.pdf'.format(odir,fname), bbox_inches='tight')
-	plt.close(fig)
+indo=0.0
+for svo in size_v_opening:
+    sizei[0]=svo
+    for svd in size_v_dilation:
+        sizei[1]=svd
+        for sho in size_h_opening:
+            sizei[2]=sho
+            for shd in size_h_dilation:
+                sizei[3]=shd
+                sizestr='|'.join([str(sz) for sz in sizei])
+                for file in files:
+                    fpat, fname, ftype = filename(file)
+                    print file
+                    location = "{}/{}/{}/{}".format(sourceloc,replicate,plate,file)
+                    well=indx2well(int(fname.split('_')[1]),start=1)
+                    fig, axes = plt.subplots(nrows=len(brights), ncols=len(hues),sharex=True, sharey=True, figsize=(40,24), dpi=300)
+                    fig.suptitle('{} - {} | {}'.format(fname,well,nutrients[plate][well]['Metabolite']))
+                    #plt.subplots_adjust(left=0.1, bottom=0.1, right=0.95, top=0.5, wspace=0, hspace=0)
+                    ind=0.0
+                    for bi, bval in enumerate(brights):
+                        for hi,hval in enumerate(hues):
+                            
+                            ind=ind+1.0
+                            indo=indo+1.0
+                            thresi=thresholds
+                            thresi[0]=bval
+                            thresi[2]=hval
+                            thrstr='|'.join([str(th) for th in thresi])
+                            
+                            image,imgrgb,vdilated,hdilated,img2hsv,img2rgb=thresholding(location,thresi,sizes)
+                            plt.sca(axes[bi, hi]);ax = axes[bi, hi]
+                            plt.imshow(img2hsv)
+                            plt.setp(ax.get_yticklabels(), visible=False)
+                            plt.setp(ax.get_xticklabels(), visible=False)
+                
+                            if hi == 0:
+                                ax.yaxis.set_label_position("left")
+                                plt.ylabel(bval, rotation='vertical')
+                            if bi == 0:
+                                plt.title(hval)
+                
+                
+                            prcf=ind*100.0/totalf
+                            prco=indo*100.0/overall
+                            print '{:}:{:6.1f}% |{:6.1f}%'.format(fname,prcf,prco)
+                
+                    #fig.tight_layout()
+                    fig.savefig('{}/{}_{}_{}_parameters.pdf'.format(odir,replicate,fname,sizestr), bbox_inches='tight')
+                    plt.close(fig)
+                
+
+#==============================================================================
+# End Block
+#==============================================================================
+
+
+
+#==============================================================================
+# #@#96 well previews
+#==============================================================================
+
+
+
+#rows=['A','B','C','D','E','F','G','H']
+
+ttllen=24
+ttlsize=24
+
+thresholds=[0.03,1,0.365,0.4]
+sizes=[3,1,3,1]
+
+
+minimage=1
+maximage=96
+
+
+thresi=thresholds
+sizei=sizes
+
+thrstr='|'.join([str(th) for th in thresi])
+sizestr='|'.join([str(sz) for sz in sizei])
+
+
+#
+#odir='2017-05-17_Trial_analysis2'
+#sourceloc="2017-05-17_Trial"
+
+plates=['PM1','PM2A','PM3B','PM4A']
+
+figures=['Original','Mask']
+
+
+
+
+#plates=['PM1']
+for plate in plates:
+    files=["{}_{}.tif".format(plate,str(im).zfill(3)) for im in range(1,96+1)]
+    
+    figall=[]
+    axall=[]
+    for fi,fign in enumerate(figures):
+        fig, axes = plt.subplots(nrows=8, ncols=12, figsize=(72,47), dpi=300)
+        fig.suptitle('{}-{}'.format(replicate,plate),fontsize=40)
+        plt.subplots_adjust(left=0.1, bottom=0.1, right=0.95, top=2, wspace=0.5, hspace=0.1)
+        figall.append(fig)
+        axall.append(axes)
+    
+    row=0
+    col=0
+    for flin,fln in enumerate(files):
+        fpat, fname, ftype = filename(fln)
+        #print plate, fln, row, col
+        location = "{}/{}/{}/{}".format(sourceloc,replicate,plate,fln)
+        
+        image,imgrgb,vdilated,hdilated,img2hsv,img2rgb=thresholding(location,thresi,sizei)
+        #image = tiff.imread(location)
+        
+        #imghsv=color.rgb2hsv(image)
+        #imgrgb=color.hsv2rgb(imghsv)
+        #h =imghsv[:,:,0]
+        #s =imghsv[:,:,1]
+        #v =imghsv[:,:,2]
+        well=indx2well(flin)
+        ttl='{}-{} | {}'.format(flin+1,well,nutrients[plate][well]['Metabolite'])
+        ttlw='\n'.join(tw.wrap(ttl,ttllen))
+        
+        for fi,fign in enumerate(figures):
+            fig=figall[fi]
+            axes=axall[fi]
+            #plt.figure(fi)
+            plt.sca(axes[row,col])
+            ax = axes[row,col]
+            
+            if fign=='Original':
+                plt.imshow(imgrgb)
+            elif fign=='Mask':
+                plt.imshow(img2hsv)
+            else:
+                plt.imshow(image)
+            
+            plt.title(ttlw,fontsize=ttlsize)
+            plt.setp(ax.get_yticklabels(), visible=False)
+            plt.setp(ax.get_xticklabels(), visible=False)
+        
+        col=col+1
+        if col==12:
+            col=0
+            row=row+1
+        prc=(flin+1)*100.0/len(files)
+        print '{:} {:} {:}:{:6.1f}%'.format(replicate,plate,fname,prc)
+        
+    for fi,fign in enumerate(figures):
+        fig=figall[fi]
+        axes=axall[fi]
+        #plt.figure(fi)
+        fig.tight_layout()
+        
+        if fign=='Original':
+            ofignm='{}/{}_{}_{}.pdf'.format(odir,replicate,plate,fign)
+        elif fign=='Mask':
+            ofignm='{}/{}_{}_{}_{}_{}.pdf'.format(odir,replicate,plate,thrstr,sizestr,fign)
+        else:
+            ofignm='{}/{}_{}_{}.pdf'.format(odir,replicate,plate,fign)
+        fig.savefig(ofignm, bbox_inches='tight')
+        plt.close(fig)
+    
+
+
+
+
+rfile="{}/{}/NGM_Control_Rep1.tif".format(sourceloc,replicate)
+
+tfile="{}/{}/{}/PM1_001.tif".format(sourceloc,replicate,'PM1')
+
+ref=tiff.imread(rfile)
+image = tiff.imread(tfile)
+
+
+refhsv=color.rgb2hsv(ref)
+
+image.shape
+image.dtype
+
+plt.imshow(image)
+
+
+#import opencv as cv2
 
 
 
 
 
-
-
-
-
-
-header=['File','Brightness_min','Brightness_max','Hue_min','Hue_max','Bright_opening','Bright_dilation','Hue_opening','Hue_dilation']+range(1,maxpix+1)
-data.insert(0,header)
-
-
-
-f=open('20170503_analysis/Summary.csv',"wb")
-ofile=csv.writer(f, delimiter='\t') # dialect='excel',delimiter=';', quotechar='"', quoting=csv.QUOTE_ALL
-for row in data:
-	#row = [item.encode("utf-8") if isinstance(item, unicode) else str(item) for item in row]
-	ofile.writerow(row)
-f.close()
 
 
 
