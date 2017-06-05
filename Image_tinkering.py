@@ -21,7 +21,11 @@ from skimage.util import img_as_ubyte
 
 
 from skimage.morphology import disk, opening, dilation, square
+from skimage.morphology import erosion, white_tophat, black_tophat, closing
 from skimage import exposure
+
+from skimage.filters.rank import median, mean
+from scipy import misc, ndimage
 
 
 import tifffile as tiff
@@ -29,6 +33,8 @@ import tifffile as tiff
 import textwrap as tw
 
 import csv
+
+import pandas
 
 def filename(ifile):
 	if ifile.split('.')[0]=='':
@@ -101,6 +107,116 @@ def thresholding(file,thresholds,sizes):
     return image,imgrgb,vdilated,hdilated,img2,img2rgb
 
 
+
+def thresholding2(file,thresholds,sizes,delworms):
+    #file = '20170503/image_011.tif'
+    #Changed from skio.imread, which could not handle 16bit TIFF
+    image = tiff.imread(file)
+    if len(sizes)==2:
+        vc_size,hc_size=sizes
+    else:
+        print 'Fix your sizes parameters!'
+        vc_size=sizes[0]
+        hc_size=sizes[1]
+    
+    vmin,vmax,hmin,hmax=thresholds
+    #image.shape
+    #image.dtype
+    imghsv=color.rgb2hsv(image)
+    imgrgb=color.hsv2rgb(imghsv)
+
+    h =imghsv[:,:,0]
+    #s =imghsv[:,:,1]
+    v =imghsv[:,:,2]
+    
+    vmask = (v > vmin).astype(np.float64);  # Thresholding in Brightness
+    vmask = (vmask< vmax).astype(np.float64)
+    
+    hmask = (h > hmin).astype(np.float64);  # Thresholding in Hue
+    hmask = (hmask< hmax).astype(np.float64)
+    
+    #Works reallt well
+    #Morphological filtering
+    v_closing = closing(vmask, selem=disk(vc_size))
+    h_closing = closing(hmask, selem=disk(hc_size))
+    #plt.imshow(hopened); plt.title('Hue mask')
+    #plt.imshow(hdilated); plt.title('Hue mask')
+
+    img2 = imghsv.copy()
+    img2[h_closing.astype(bool), :] = 0; # Set the pixels to zero by Hue mask
+    img2[v_closing.astype(bool), :] = 0; # Set the pixels to zero by Lightness mask
+    for worm in delworms:
+        x1,y1,x2,y2=worm
+        xs=[x1,x2]
+        ys=[y1,y2]
+        
+        img2[min(ys):max(ys),min(xs):max(xs), :] = 0
+
+    img2rgb=color.hsv2rgb(img2)
+
+    return image,imgrgb,v_closing,h_closing,img2,img2rgb
+
+
+def thresholding3(file,thresholds,sizes,alpha,delworms):
+    #file = '20170503/image_011.tif'
+    #Changed from skio.imread, which could not handle 16bit TIFF
+    image = tiff.imread(file)
+    if len(sizes)==2:
+        vc_size,hc_size=sizes
+    else:
+        print 'Fix your sizes parameters!'
+        vc_size=sizes[0]
+        hc_size=sizes[1]
+    
+    vmin,vmax,hmin,hmax=thresholds
+    #image.shape
+    #image.dtype
+    imghsv=color.rgb2hsv(image)
+    imgrgb=color.hsv2rgb(imghsv)
+
+    h =imghsv[:,:,0]
+    #s =imghsv[:,:,1]
+    v =imghsv[:,:,2]
+    
+    v_filter_blurred_l = ndimage.gaussian_filter(v, 1)
+    vsharp = v + alpha * (v - v_filter_blurred_l)
+
+    
+    h_filter_blurred_l = ndimage.gaussian_filter(h, 1)
+    hsharp = h + alpha * (h - h_filter_blurred_l)
+    
+    
+    
+    vmask = (vsharp > vmin).astype(np.float64);  # Thresholding in Brightness
+    vmask = (vmask< vmax).astype(np.float64)
+    
+    hmask = (hsharp > hmin).astype(np.float64);  # Thresholding in Hue
+    hmask = (hmask< hmax).astype(np.float64)
+    
+    #Works reallt well
+    #Morphological filtering
+    v_closing = closing(vmask, selem=disk(vc_size))
+    h_closing = closing(hmask, selem=disk(hc_size))
+    #plt.imshow(hopened); plt.title('Hue mask')
+    #plt.imshow(hdilated); plt.title('Hue mask')
+
+    img2 = imghsv.copy()
+    img2[h_closing.astype(bool), :] = 0; # Set the pixels to zero by Hue mask
+    img2[v_closing.astype(bool), :] = 0; # Set the pixels to zero by Lightness mask
+    for worm in delworms:
+        x1,y1,x2,y2=worm
+        xs=[x1,x2]
+        ys=[y1,y2]
+        
+        img2[min(ys):max(ys),min(xs):max(xs), :] = 0
+
+    img2rgb=color.hsv2rgb(img2)
+
+    return image,imgrgb,v_closing,h_closing,img2,img2rgb
+
+
+
+
 def slice_list(input, size):
     input_size = len(input)
     slice_size = input_size / size
@@ -149,7 +265,6 @@ def indx2well(ind,start=0,rowln=12):
 def readmet(ifile):
 	print ifile
 	nutrients=NestedDict()
-
 	rdr=csv.reader(open(ifile,'r'), delimiter=',')
 	data=[ln for ln in rdr]
 	headers=data[0]
@@ -171,29 +286,110 @@ def readmet(ifile):
 
 
 
+def readdel(ifile):
+    print ifile
+    
+    deletions=NestedDict()
+    rdr=csv.reader(open(ifile,'r'), delimiter=',')
+    data=[ln for ln in rdr]
+    headers=data[0]
+    headin={ hd : headers.index(hd) for hd in headers}
+    nec=['Replicate','Plate','Index','File','X1','Y1','X2','Y2']#,'Well'
+    if all(n in headers for n in nec):
+        print 'Necessary headers found!'
+    else:
+        print 'Missing essential headers in deletions file!'
+        print headers
+        sys.exit(0)
+    for ln in data[1:]:
+        #print ln
+        #Reading
+        rep=ln[headin['Replicate']].strip().encode('ascii','ignore')
+        pl=ln[headin['Plate']].strip().encode('ascii','ignore')
+        fl=ln[headin['File']].strip().encode('ascii','ignore')
+        indx=numerize(ln[headin['Index']])
+        coords=[numerize(ln[headin[hdr]]) for hdr in ['X1','Y1','X2','Y2']]
+        #Storing
+        deletions[rep][pl][indx]['File']=fl
+        
+        if 'Worms' in deletions[rep][pl][indx].keys():
+            worms=deletions[rep][pl][indx]['Worms']
+            worms.append(coords)
+            deletions[rep][pl][indx]['Worms']=worms
+        else:
+            deletions[rep][pl][indx]['Worms']=[coords]
+        
+    return deletions
 
 
 
-os.chdir("/users/povilas/Dropbox/Projects/2015-Metformin/Worm_imaging")
+
+def plot_comparison(figs, labels):
+    nfig=len(figs)
+    nlab=len(labels)
+    fig, axes = plt.subplots(ncols=nfig, figsize=(4*nfig, 4), sharex=True,
+                                   sharey=True)
+    
+    for fid,fplot in enumerate(figs):
+        ax = axes[fid]
+        ax.imshow(fplot) #, cmap=plt.cm.gray
+        ax.set_title(labels[fid])
+        ax.axis('off')
+        ax.set_adjustable('box-forced')
+    
+#    ax2.imshow(filtered, cmap=plt.cm.gray)
+#    ax2.set_title(filter_name)
+#    ax2.axis('off')
+#    ax2.set_adjustable('box-forced')
+#    
+#    ax3.imshow(extract) #cmap=plt.cm.gray
+#    ax3.set_title('Extract')
+#    ax3.axis('off')
+#    ax3.set_adjustable('box-forced')
+    
+    return fig,axes
+    
+
+def freqtable(vector):
+    my_series=pandas.Series(vector)
+    counts = my_series.value_counts()
+    ftable=[[key,value] for key,value in dict(counts).iteritems() ]
+    return ftable
+
+
+def writecsv(data,ofile,sep=','):
+    f=open(ofile,"wb")
+    ofile=csv.writer(f, delimiter=sep) # dialect='excel',delimiter=';', quotechar='"', quoting=csv.QUOTE_ALL
+    for row in data:
+    	#row = [item.encode("utf-8") if isinstance(item, unicode) else str(item) for item in row]
+    	ofile.writerow(row)
+    f.close()
+
+
+
+
+os.chdir("/users/povilas/Dropbox/Projects/2015-Metformin/Biolog_Met_NGM/Celegans")
 matplotlib.rcParams.update({'font.size': 12})
 
 sourceloc="/Users/Povilas/Dropbox/Projects/Biolog_Celegans_Metformin"
 replicate="Rep1"
 plate="PM1"
 
-odir='Metformin_Biolog_Celegans_Screen_results'
+odir='.'
 
 nutrients=readmet('/Users/Povilas/Dropbox/Projects/2015-Metformin/Biolog/Biolog_metabolites_EcoCyc.csv')
+
+alldeletions=readdel('{}/Deletions.csv'.format(odir))
+
+
+
 #Analyse multiple images
 #thresholds=[0.05,1,0.355,0.4]
 #sizes=[3,1,3,1]
 
 
 thresholds=[0.02,1,0.355,0.4]
-sizes=[3,1,3,1]
-
-
-
+sizes=[7,7]
 
 minimage=1
 maximage=96
@@ -217,7 +413,7 @@ for file in files:
 	print file
 	location = "{}/{}/{}/{}".format(sourceloc,replicate,plate,file)
 
-	image,vdilated,hdilated,img2hsv,img2rgb=thresholding(location,thresholds,sizes)
+	image,v_opening,h_opening,img2hsv,img2rgb=thresholding(location,thresholds,sizes)
 
 	histinfo_o = exposure.histogram(image)
 	histinfo_t = exposure.histogram(img2rgb)
@@ -271,12 +467,10 @@ data.insert(0,header)
 
 
 
-f=open('{}/Summary.csv'.format(odir),"wb")
-ofile=csv.writer(f, delimiter='\t') # dialect='excel',delimiter=';', quotechar='"', quoting=csv.QUOTE_ALL
-for row in data:
-	#row = [item.encode("utf-8") if isinstance(item, unicode) else str(item) for item in row]
-	ofile.writerow(row)
-f.close()
+ofile='{}/Summary.csv'.format(odir)
+
+writecsv(data,ofile)
+
 
 
 
@@ -294,15 +488,15 @@ f.close()
 #sourceloc="2017-05-17_Trial"
 
 thresholds=[0.05,1,0.355,0.4]
-sizes=[3,1,3,1]
+sizes=[7,7]
 
-hstep=0.005
-hmin=0.34
-hmax=0.375
+hstep=0.01
+hmin=0.2
+hmax=0.3
 
-bstep=0.0025
+bstep=0.005
 bmin=0.01
-bmax=0.03
+bmax=0.05
 
 hues=np.arange(hmin,hmax+hstep,hstep)
 brights=np.arange(bmin,bmax+bstep,bstep)
@@ -312,98 +506,227 @@ totalf=len(brights)*len(hues)
 
 #files=["image_{}.tif".format(str(im).zfill(3)) for im in range(minimage,maximage+1)]
 
-replicate="Rep1"
+replicate="Rep2"
 plate="PM1"
 #imid=33
 
 
 #files=["{}_{}.tif".format(plate,str(im).zfill(3)) for im in range(minimage,maximage+1)]
 
-files=["{}_{}.tif".format(plate,str(imid).zfill(3)) for imid in [1,2,9,15,18,28,33,35,61]]
+#filenum=[1,2,9,15,18,28,33,35,61]
+filenum=[1,2,9,28,33]
+
+files=["{}_{}.tif".format(plate,str(imid).zfill(3)) for imid in filenum]
 
 data=[]
 
 sizei=sizes
 
-size_v_opening=[3]
-size_v_dilation=[1]
-size_h_opening=[3]
-size_h_dilation=[1]
+#size_v_opening=[3,4]
+#size_v_dilation=[1,2]
+#size_h_opening=[3,4]
+#size_h_dilation=[1,2]
+#Next run
+
+size_v_closing=[7]
+size_h_closing=[7]
 
 
-overall=len(files)*totalf*len(size_v_opening)*len(size_v_dilation)*len(size_h_opening)*len(size_h_dilation)
+overall=len(files)*totalf*len(size_v_closing)*len(size_h_closing)
 print overall
 
 indo=0.0
-for svo in size_v_opening:
-    sizei[0]=svo
-    for svd in size_v_dilation:
-        sizei[1]=svd
-        for sho in size_h_opening:
-            sizei[2]=sho
-            for shd in size_h_dilation:
-                sizei[3]=shd
-                sizestr='|'.join([str(sz) for sz in sizei])
-                for file in files:
-                    fpat, fname, ftype = filename(file)
-                    print file
-                    location = "{}/{}/{}/{}".format(sourceloc,replicate,plate,file)
-                    well=indx2well(int(fname.split('_')[1]),start=1)
-                    fig, axes = plt.subplots(nrows=len(brights), ncols=len(hues),sharex=True, sharey=True, figsize=(40,24), dpi=300)
-                    fig.suptitle('{} - {} | {}'.format(fname,well,nutrients[plate][well]['Metabolite']))
-                    #plt.subplots_adjust(left=0.1, bottom=0.1, right=0.95, top=0.5, wspace=0, hspace=0)
-                    ind=0.0
-                    for bi, bval in enumerate(brights):
-                        for hi,hval in enumerate(hues):
-                            
-                            ind=ind+1.0
-                            indo=indo+1.0
-                            thresi=thresholds
-                            thresi[0]=bval
-                            thresi[2]=hval
-                            thrstr='|'.join([str(th) for th in thresi])
-                            
-                            image,imgrgb,vdilated,hdilated,img2hsv,img2rgb=thresholding(location,thresi,sizes)
-                            plt.sca(axes[bi, hi]);ax = axes[bi, hi]
-                            plt.imshow(img2hsv)
-                            plt.setp(ax.get_yticklabels(), visible=False)
-                            plt.setp(ax.get_xticklabels(), visible=False)
-                
-                            if hi == 0:
-                                ax.yaxis.set_label_position("left")
-                                plt.ylabel(bval, rotation='vertical')
-                            if bi == 0:
-                                plt.title(hval)
-                
-                
-                            prcf=ind*100.0/totalf
-                            prco=indo*100.0/overall
-                            print '{:}:{:6.1f}% |{:6.1f}%'.format(fname,prcf,prco)
-                
-                    #fig.tight_layout()
-                    fig.savefig('{}/{}_{}_{}_parameters.pdf'.format(odir,replicate,fname,sizestr), bbox_inches='tight')
-                    plt.close(fig)
-                
+for svc in size_v_closing:
+    sizei[0]=svc
+    for shc in size_h_closing:
+        sizei[1]=shc
+        sizestr='|'.join([str(sz) for sz in sizei])
+        for file in files:
+            fpat, fname, ftype = filename(file)
+            print file
+            location = "{}/{}/{}/{}".format(sourceloc,replicate,plate,file)
+            well=indx2well(int(fname.split('_')[1]),start=1)
+            fig, axes = plt.subplots(nrows=len(brights), ncols=len(hues),sharex=True, sharey=True, figsize=(40,24), dpi=300)
+            fig.suptitle('{} - {} | {}'.format(fname,well,nutrients[plate][well]['Metabolite']))
+            #plt.subplots_adjust(left=0.1, bottom=0.1, right=0.95, top=0.5, wspace=0, hspace=0)
+            ind=0.0
+            for bi, bval in enumerate(brights):
+                for hi,hval in enumerate(hues):
+                    
+                    ind=ind+1.0
+                    indo=indo+1.0
+                    thresi=thresholds
+                    thresi[0]=bval
+                    thresi[2]=hval
+                    thrstr='|'.join([str(th) for th in thresi])
+                    
+                    indx=int(fname.split('_')[1])
+                    if indx in alldeletions[replicate][plate].keys():
+                        print 'Deleting some worms!'
+                        delworms=alldeletions[replicate][plate][indx]['Worms']
+                    else:
+                        delworms=[]
+        
+                    image,imgrgb,v_closing,h_closing,img2hsv,img2rgb=thresholding2(location,thresi,sizei,delworms)
+                    
+                    #image,imgrgb,v_closing,h_closing,img2hsv,img2rgb=thresholding2(location,thresi,sizes)
+                    #image,imgrgb,v_closing,h_closing,img2hsv,img2rgb=thresholding3(location,thresi,sizes,2)
+                    plt.sca(axes[bi, hi]);ax = axes[bi, hi]
+                    plt.imshow(img2hsv)
+                    plt.setp(ax.get_yticklabels(), visible=False)
+                    plt.setp(ax.get_xticklabels(), visible=False)
+        
+                    if hi == 0:
+                        ax.yaxis.set_label_position("left")
+                        plt.ylabel(bval, rotation='vertical')
+                    if bi == 0:
+                        plt.title(hval)
+        
+        
+                    prcf=ind*100.0/totalf
+                    prco=indo*100.0/overall
+                    print '{:}:{:6.1f}% |{:6.1f}%'.format(fname,prcf,prco)
+        
+            #fig.tight_layout()
+            fig.savefig('{}/{}_{}_{}_parameters.pdf'.format(odir,replicate,fname,sizestr), bbox_inches='tight')
+            plt.close(fig)
 
 #==============================================================================
 # End Block
 #==============================================================================
 
 
+#==============================================================================
+# Mark sick worms
+#==============================================================================
+
+#def onclick(event):
+#    global ix, iy
+#    global coords
+#    #global worms
+#    #coords=[]
+#
+#    ix, iy = event.xdata, event.ydata
+#    print 'x = %d, y = %d'%(ix, iy)
+#    coords.append([ix, iy])
+#
+#    #if len(coords) == 2:
+#    fig.canvas.mpl_disconnect(cid)
+#                    
+#    return coords
+
+
+
+deletions={'Rep1-PM1':[3,29,33,41,44,57,62,93],
+           'Rep1-PM2A':[30,40,41,45,47,48,75],
+           'Rep1-PM3B':[10,31,33,41,90],
+           'Rep1-PM4A':[32,58,82]}
+
+dfiles=[ "{}/{}/{}/{}_{}.tif".format(sourceloc,replicate,plate,plate,str(im).zfill(3)) for im in  deletions.iteritems()]
+
+thresi=[0.02,1,0.345,0.4]
+sizei=[7,7]
+
+
+
+#from matplotlib.patches import Rectangle
+
+deldata=[]
+plt.ion() ## Note this correction
+for dkey in deletions.keys():
+    rep,plate=dkey.split('-')
+    dfiles=deletions[dkey]
+    for indx in dfiles:
+        dfile="{}/{}/{}/{}_{}.tif".format(sourceloc,rep,plate,plate,str(indx).zfill(3))
+        dname=os.path.basename(dfile)
+        well=indx2well(indx)
+        
+        
+        print rep,plate,well,dname
+        
+        
+        
+        image,imgrgb,v_closing,h_closing,img2hsv,img2rgb=thresholding2(dfile,thresi,sizei)
+        
+        #v=img2hsv[:,:,2]
+        #plt.imshow(s_img2hsv[822:964,749:1014,:])
+        worms=[]
+        coords=[]
+        fig,axes=plot_comparison(imgrgb,img2hsv,'Pick worms: {}'.format(dname))
+
+        while True:
+            #while len(coords)<2:
+            coords=plt.ginput(2)
+            print coords
+            
+            x1,y1=coords[0]
+            x2,y2=coords[1]
+            
+            xs=[x1,x2]
+            ys=[y1,y2]
+            
+            excordt=[x1,y1,x2,y2]
+            excord=[int(c) for c in excordt]
+            
+            #ax2=axes[1]
+            #ax2.add_patch(Rectangle(( max(xs)- min(xs), max(ys) -min(ys)), 0.2, 0.2,
+            #          alpha=0.5, facecolor='none'))
+            #fig.canvas.draw()
+            #cid = fig.canvas.mpl_connect('button_press_event', onclick)
+            #plt.waitforbuttonpress()
+            #print coords,cid
+            
+            #plt.pause(0.05)
+            save=raw_input("Save coordinates (y/n)?: ")
+            if save=='y':
+                worms.append(excord)
+                coords=[]
+                multi=raw_input("Mark other worms (y/n)?: ")
+                if multi=='y':
+                    continue
+                else:
+                    break
+            else:
+                coords=[]
+                multi=raw_input("Mark other worm (y/n)?: ")
+                if multi=='y':
+                    continue
+                else:
+                    break
+            
+        headr=[rep,plate,indx,dname]
+        for worm in worms:
+            deldata.append(headr+worm)
+        plt.close(fig)
+
+
+header=['Replicate','Plate','Index','File','X1','Y1','X2','Y2']
+deldata.insert(0,header)
+
+#ofile='{}/Deletions.csv'.format(odir)
+#writecsv(deldata,ofile)
+
+
+
+
+
+
 
 #==============================================================================
 # #@#96 well previews
 #==============================================================================
-
-
-
 #rows=['A','B','C','D','E','F','G','H']
 
 ttllen=24
 ttlsize=24
 
-thresholds=[0.03,1,0.365,0.4]
-sizes=[3,1,3,1]
+#Rep1
+#thresholds=[0.02,1,0.345,0.4]
+#sizes=[7,7]
+
+
+thresholds=[0.02,1,0.25,0.5]
+sizes=[7,7]
 
 
 minimage=1
@@ -417,21 +740,25 @@ thrstr='|'.join([str(th) for th in thresi])
 sizestr='|'.join([str(sz) for sz in sizei])
 
 
-#
-#odir='2017-05-17_Trial_analysis2'
-#sourceloc="2017-05-17_Trial"
 
+replicate='Rep2'
 plates=['PM1','PM2A','PM3B','PM4A']
+
+plate=plates[0]
 
 figures=['Original','Mask']
 
 
 
+data=[]
+
+maxpix=0
 
 #plates=['PM1']
+indo=0.0
 for plate in plates:
     files=["{}_{}.tif".format(plate,str(im).zfill(3)) for im in range(1,96+1)]
-    
+    total=len(plates)*len(files)
     figall=[]
     axall=[]
     for fi,fign in enumerate(figures):
@@ -440,22 +767,29 @@ for plate in plates:
         plt.subplots_adjust(left=0.1, bottom=0.1, right=0.95, top=2, wspace=0.5, hspace=0.1)
         figall.append(fig)
         axall.append(axes)
-    
     row=0
     col=0
     for flin,fln in enumerate(files):
         fpat, fname, ftype = filename(fln)
         #print plate, fln, row, col
         location = "{}/{}/{}/{}".format(sourceloc,replicate,plate,fln)
+        indx=flin+1
+        if indx in alldeletions[replicate][plate].keys():
+            print 'Deleting some worms!'
+            delworms=alldeletions[replicate][plate][indx]['Worms']
+        else:
+            delworms=[]
         
-        image,imgrgb,vdilated,hdilated,img2hsv,img2rgb=thresholding(location,thresi,sizei)
+        image,imgrgb,v_closing,h_closing,img2hsv,img2rgb=thresholding2(location,thresi,sizei,delworms)
         #image = tiff.imread(location)
-        
         #imghsv=color.rgb2hsv(image)
         #imgrgb=color.hsv2rgb(imghsv)
         #h =imghsv[:,:,0]
         #s =imghsv[:,:,1]
-        #v =imghsv[:,:,2]
+        v2 =img2hsv[:,:,2]
+        
+        #Collect data
+        
         well=indx2well(flin)
         ttl='{}-{} | {}'.format(flin+1,well,nutrients[plate][well]['Metabolite'])
         ttlw='\n'.join(tw.wrap(ttl,ttllen))
@@ -464,8 +798,17 @@ for plate in plates:
             fig=figall[fi]
             axes=axall[fi]
             #plt.figure(fi)
-            plt.sca(axes[row,col])
-            ax = axes[row,col]
+            #print row,col
+            try:
+                plt.sca(axes[row,col])
+            except Exception as e:
+                print e
+                sys.exit(1)
+            try:
+                ax = axes[row,col]
+            except Exception as e:
+                print e
+                sys.exit(1)
             
             if fign=='Original':
                 plt.imshow(imgrgb)
@@ -477,13 +820,23 @@ for plate in plates:
             plt.title(ttlw,fontsize=ttlsize)
             plt.setp(ax.get_yticklabels(), visible=False)
             plt.setp(ax.get_xticklabels(), visible=False)
+            
+        bright1D=[el for el in list(v2.ravel()) if el>0]
+        ftable=freqtable(bright1D)
+        rowhead=[replicate,plate,well,fln]#+thresi+sizei
+        for fv in ftable:
+            data.append(rowhead+fv)
         
         col=col+1
         if col==12:
             col=0
             row=row+1
-        prc=(flin+1)*100.0/len(files)
-        print '{:} {:} {:}:{:6.1f}%'.format(replicate,plate,fname,prc)
+        
+        indo=indo+1
+        prc=(flin+1)*100.0/len(files)        
+        prco=(indo)*100.0/total
+
+        print '{:} {:} {:}:{:6.1f}% | {:6.1f}%'.format(replicate,plate,fname,prc,prco)
         
     for fi,fign in enumerate(figures):
         fig=figall[fi]
@@ -499,293 +852,165 @@ for plate in plates:
             ofignm='{}/{}_{}_{}.pdf'.format(odir,replicate,plate,fign)
         fig.savefig(ofignm, bbox_inches='tight')
         plt.close(fig)
+
+header=['Replicate','Plate','Well','File','Brightness_value','Frequency']
+data.insert(0,header)
+
+
+f=open('{}/Summary_{}_{}_{}.csv'.format(odir,replicate,thrstr,sizestr),"wb")
+ofile=csv.writer(f, delimiter='\t') # dialect='excel',delimiter=';', quotechar='"', quoting=csv.QUOTE_ALL
+for row in data:
+	#row = [item.encode("utf-8") if isinstance(item, unicode) else str(item) for item in row]
+	ofile.writerow(row)
+f.close()
+
+
+
+
+
+
+#alldeletions=readdel('{}/Deletions.csv'.format(odir))
+
+replicate='Rep1'
+plate='PM1'
+indx=33
+#rfile="{}/{}/NGM_Control_Rep1.tif".format(sourceloc,replicate)
+tfile="{}/{}/{}/{}_{}.tif".format(sourceloc,replicate,plate,plate,str(indx).zfill(3))
+
+
+thresi=[0.03,1,0.347,0.4]
+sizei=[7,7]
+alpha=2
+
+
+if indx in alldeletions[replicate][plate].keys():
+    delworms=alldeletions[replicate][plate][33]['Worms']
+else:
+    delworms=[]
+
+
+image,imgrgb,v_closing,h_closing,img2hsv,img2rgb=thresholding2(tfile,thresi,sizei,delworms)
+
+#s_image,s_imgrgb,s_v_closing,s_h_closing,s_img2hsv,s_img2rgb=thresholding3(tfile,thresi,sizei,alpha,delworms)
+
+v=img2hsv[:,:,2]
+#s_v=s_img2hsv[:,:,2]
+
+figs=[imgrgb,v_closing,h_closing,img2hsv,v]
+labels=['Original','V_Mask','H_Mask','Mask','Extract']
+fig=plot_comparison(figs,labels)
+
+
+#fig = plt.figure()
+#ax = fig.add_subplot(111)
+#plt.imshow(s_v)
+
+#coords = []
+
+def onclick(event):
+    global ix, iy
+    ix, iy = event.xdata, event.ydata
+    print 'x = %d, y = %d'%(ix, iy)
+
+    global coords
+    coords.append([ix, iy])
+
+    if len(coords) == 2:
+        fig.canvas.mpl_disconnect(cid)
+
+    return coords
+
+cid = fig.canvas.mpl_connect('button_press_event', onclick)
+
+
+
+
+#Rectangle
+from matplotlib.patches import Rectangle
+
+class Annotate(object):
+    def __init__(self):
+        self.ax = plt.gca()
+        self.rect = Rectangle((0,0), 1, 1)
+        self.x0 = None
+        self.y0 = None
+        self.x1 = None
+        self.y1 = None
+        self.ax.add_patch(self.rect)
+        self.ax.figure.canvas.mpl_connect('button_press_event', self.on_press)
+        self.ax.figure.canvas.mpl_connect('button_release_event', self.on_release)
+
+    def on_press(self, event):
+        print 'press'
+        self.x0 = event.xdata
+        self.y0 = event.ydata
+
+    def on_release(self, event):
+        print 'release'
+        self.x1 = event.xdata
+        self.y1 = event.ydata
+        self.rect.set_width(self.x1 - self.x0)
+        self.rect.set_height(self.y1 - self.y0)
+        self.rect.set_xy((self.x0, self.y0))
+        self.ax.figure.canvas.draw()
+
+a = Annotate()
+plt.show()
+
+
+
+
+#refhsv=color.rgb2hsv(ref)
+
+#image.shape
+#image.dtype
+
+#plt.imshow(image)
+#image = tiff.imread(file)
+#lena = misc.lena()
+#blurred_l = ndimage.gaussian_filter(lena, 3)
+##increase the weight of edges by adding an approximation of the Laplacian:
     
+blur =imghsv[:,:,2]
 
+filter_blurred_l = ndimage.gaussian_filter(blur, 1)
+alpha = 30
+sharpened = blur + alpha * (blur - filter_blurred_l)
+plt.imshow(sharpened)
 
 
 
-rfile="{}/{}/NGM_Control_Rep1.tif".format(sourceloc,replicate)
+vc_size,hc_size=[7,7]
 
-tfile="{}/{}/{}/PM1_001.tif".format(sourceloc,replicate,'PM1')
+vmin,vmax,hmin,hmax=[0.05,1,0.35,0.4]
+#image.shape
+#image.dtype
+imghsv=color.rgb2hsv(image)
 
-ref=tiff.imread(rfile)
-image = tiff.imread(tfile)
+imgrgb=color.hsv2rgb(imghsv)
 
-
-refhsv=color.rgb2hsv(ref)
-
-image.shape
-image.dtype
-
-plt.imshow(image)
-
-
-#import opencv as cv2
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#Get brightness channel
-
-
-plt.imshow(imgrgb)
-
-bright=imghsv[:,:,2]
-bright1D=bright.ravel()
-bright1D=bright1D*255.0
-len(bright1D)
-
-
-bright1D_filt=[el for el in list(bright1D) if el>0]
-
-len(bright1D_filt)
-
-
-np.mean(bright1D_filt)
-
-histinfo_t = exposure.histogram(imgrgb)
-histinfo_t[0][0] = 0
-
-
-np.sum(histinfo_t[1]*histinfo_t[0])/np.sum(histinfo_t[0])
-
-
-
-
-#image 6
-0.064363794254385251
-#image 5
-0.044202210383164464
-
-
-
-
-plt.plot(histinfo[1],histinfo[0])
-plt.title("Gaussian Histogram");plt.xlabel("Value");plt.ylabel("Frequency")
-
-
-
-def plot_img_and_hist(image, axes, bins=256):
-    """Plot an image along with its histogram and cumulative histogram.
-
-    """
-    ax_img, ax_hist = axes
-    ax_cdf = ax_hist.twinx()
-
-    # Display image
-    ax_img.imshow(image, cmap=plt.cm.gray)
-    ax_img.set_axis_off()
-
-    # Display histogram
-    ax_hist.hist(image.ravel(), bins=bins)
-    ax_hist.ticklabel_format(axis='y', style='scientific', scilimits=(0, 0))
-    ax_hist.set_xlabel('Pixel intensity')
-
-    xmin, xmax = dtype_range[image.dtype.type]
-    ax_hist.set_xlim(xmin, xmax)
-
-    # Display cumulative distribution
-    img_cdf, bins = exposure.cumulative_distribution(image, bins)
-    ax_cdf.plot(bins, img_cdf, 'r')
-
-    return ax_img, ax_hist, ax_cdf
-
-
-# Load an example image
-img = img_as_ubyte(color.rgb2gray(imgthres))
-
-#img = img_as_ubyte(color.rgb2gray(img2rgb))
-
-# Global equalize
-img_rescale = exposure.equalize_hist(img)
-
-# Equalization
-selem = disk(30)
-img_eq = rank.equalize(img, selem=selem)
-
-
-# Display results
-fig = plt.figure(figsize=(8, 5))
-axes = np.zeros((2, 3), dtype=np.object)
-axes[0, 0] = plt.subplot(2, 3, 1, adjustable='box-forced')
-axes[0, 1] = plt.subplot(2, 3, 2, sharex=axes[0, 0], sharey=axes[0, 0],
-                         adjustable='box-forced')
-axes[0, 2] = plt.subplot(2, 3, 3, sharex=axes[0, 0], sharey=axes[0, 0],
-                         adjustable='box-forced')
-axes[1, 0] = plt.subplot(2, 3, 4)
-axes[1, 1] = plt.subplot(2, 3, 5)
-axes[1, 2] = plt.subplot(2, 3, 6)
-
-ax_img, ax_hist, ax_cdf = plot_img_and_hist(img, axes[:, 0])
-ax_img.set_title('Low contrast image')
-ax_hist.set_ylabel('Number of pixels')
-
-ax_img, ax_hist, ax_cdf = plot_img_and_hist(img_rescale, axes[:, 1])
-ax_img.set_title('Global equalise')
-
-ax_img, ax_hist, ax_cdf = plot_img_and_hist(img_eq, axes[:, 2])
-ax_img.set_title('Local equalize')
-ax_cdf.set_ylabel('Fraction of total intensity')
-
-
-# prevent overlap of y-axis labels
-fig.tight_layout()
-plt.show()
-
-
-
-
-
-
-
-
-
-
-
-
-
-#Colorize
-
-def colorize(image, hue, saturation=1):
-    """ Add color of the given hue to an RGB image.
-
-    By default, set the saturation to 1 so that the colors pop!
-    """
-    hsv = color.rgb2hsv(image)
-    hsv[:, :, 1] = saturation
-    hsv[:, :, 0] = hue
-    return color.hsv2rgb(hsv)
-
-hue_rotations = np.linspace(0, 1, 6)
-
-fig, axes = plt.subplots(nrows=2, ncols=3, sharex=True, sharey=True)
-
-for ax, hue in zip(axes.flat, hue_rotations):
-    # Turn down the saturation to give it that vintage look.
-    tinted_image = colorize(image, hue, saturation=0.3)
-    ax.imshow(tinted_image, vmin=0, vmax=1)
-    ax.set_axis_off()
-    ax.set_adjustable('box-forced')
-fig.tight_layout()
-
-
-#Rank
-from skimage.filters import rank
-
-
-image=imggray.copy()
-# Square regions defined as slices over the first two dimensions.
-top_left = (slice(100),) * 2
-bottom_right = (slice(-100, None),) * 2
-
-sliced_image = image.copy()
-sliced_image[top_left] = colorize(image[top_left], 0.82, saturation=0.5)
-sliced_image[bottom_right] = colorize(image[bottom_right], 0.5, saturation=0.5)
-
-# Create a mask selecting regions with interesting texture.
-noisy = rank.entropy(grayscale_image, np.ones((9, 9)))
-textured_regions = noisy > 4
-# Note that using `colorize` here is a bit more difficult, since `rgb2hsv`
-# expects an RGB image (height x width x channel), but fancy-indexing returns
-# a set of RGB pixels (# pixels x channel).
-masked_image = image.copy()
-masked_image[textured_regions, :] *= red_multiplier
-
-fig, (ax1, ax2) = plt.subplots(ncols=2, nrows=1, figsize=(8, 4), sharex=True, sharey=True)
-ax1.imshow(sliced_image)
-ax2.imshow(masked_image)
-ax1.set_adjustable('box-forced')
-ax2.set_adjustable('box-forced')
-
-plt.show()
-
-
-
-############
-
-
-
-file = '20170503/image_011.tif'
-img = skio.imread(file)
-
-img.shape
-img.dtype
-
-plt.imshow(img)
-
-imghsv=color.rgb2hsv(img)
-imggray=color.rgb2gray(img)
-
-plt.imshow(imghsv)
-
-imgfromgray=color.gray2rgb(imggray)
-
-sobel = filters.sobel(imgfromgray)
-
-
-plt.imshow(sobel)
-
-plt.imshow(imgfromgray)
-
-grayscale_image = img_as_float(img[::2, ::2])
-
-
-image = color.gray2rgb(grayscale_image)
-
-
-plt.imshow(image*[10,10,10])
-
-
-
-
-#Hue gradients
-hue_gradient = np.linspace(0, 1)
-hsv = np.ones(shape=(1, len(hue_gradient), 3), dtype=float)
-hsv[:, :, 0] = hue_gradient
-
-all_hues = color.hsv2rgb(hsv)
-
-fig, ax = plt.subplots(figsize=(5, 2))
-# Set image extent so hues go from 0 to 1 and the image is a nice aspect ratio.
-ax.imshow(all_hues, extent=(0, 1, 0, 0.2))
-ax.set_axis_off()
-
-
-
-
-
-#Split components
 h =imghsv[:,:,0]
-s =imghsv[:,:,1]
+#s =imghsv[:,:,1]
 v =imghsv[:,:,2]
 
 
-plt.figure(1, figsize=(15, 15))
+vmask = (v > vmin).astype(np.float64);  # Thresholding in the Brightness
+vmask = (vmask< vmax).astype(np.float64);
 
-plt.subplot(4,2,1); plt.imshow(h, cmap='gray'); plt.title('Hue')
-plt.subplot(4,2,2); plt.imshow(s, cmap='gray'); plt.title('Saturation')
-plt.subplot(4,2,3); plt.imshow(v, cmap='gray'); plt.title('Value')
-plt.tight_layout()
+plt.imshow(vmask)
 
 
-
-#Set hue range
-
-
+v_closing = closing(vmask, selem=disk(vc_size))
+plt.imshow(v_closing)
 
 
-#Split components
+image=h_closing
+
+filter_blurred_l = ndimage.gaussian_filter(image, 1)
+alpha = 30
+sharpened = image + alpha * (image - filter_blurred_l)
+plt.imshow(sharpened)
+
 
 
 
