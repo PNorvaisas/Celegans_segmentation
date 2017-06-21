@@ -20,6 +20,12 @@ from skimage.util.dtype import dtype_range
 from skimage.util import img_as_ubyte
 
 
+from skimage.feature import canny
+from scipy import ndimage as ndi
+from skimage.filters import sobel
+from skimage.morphology import watershed
+
+
 from skimage.morphology import disk, opening, dilation, square
 from skimage.morphology import erosion, white_tophat, black_tophat, closing
 from skimage import exposure
@@ -108,10 +114,10 @@ def thresholding(file,thresholds,sizes):
 
 
 
-def thresholding2(file,thresholds,sizes,delworms):
+def thresholding2(imghsv,thresholds,sizes,delworms):
     #file = '20170503/image_011.tif'
     #Changed from skio.imread, which could not handle 16bit TIFF
-    image = tiff.imread(file)
+    
     if len(sizes)==2:
         vc_size,hc_size=sizes
     else:
@@ -122,8 +128,7 @@ def thresholding2(file,thresholds,sizes,delworms):
     vmin,vmax,hmin,hmax=thresholds
     #image.shape
     #image.dtype
-    imghsv=color.rgb2hsv(image)
-    imgrgb=color.hsv2rgb(imghsv)
+
 
     h =imghsv[:,:,0]
     #s =imghsv[:,:,1]
@@ -154,7 +159,7 @@ def thresholding2(file,thresholds,sizes,delworms):
 
     img2rgb=color.hsv2rgb(img2)
 
-    return image,imgrgb,v_closing,h_closing,img2,img2rgb
+    return v_closing,h_closing,img2,img2rgb
 
 
 def thresholding3(file,thresholds,sizes,alpha,delworms):
@@ -364,6 +369,26 @@ def writecsv(data,ofile,sep=','):
     	#row = [item.encode("utf-8") if isinstance(item, unicode) else str(item) for item in row]
     	ofile.writerow(row)
     f.close()
+    
+def labeling(v,thr_1,thr_2,elevation='sobel'):
+    
+    markers = np.zeros_like(v)
+    markers[v < thr_1] = 1
+    markers[v > thr_2] = 2
+    
+    if elevation=='canny':
+        elevation_map = canny(v)
+        
+    else:
+        elevation_map = sobel(v)
+    
+    
+    
+    segmentation = watershed(elevation_map, markers)
+    segmentation = ndi.binary_fill_holes(segmentation - 1)
+    labeled_worms, _ = ndi.label(segmentation)
+    
+    return labeled_worms
 
 
 
@@ -382,99 +407,13 @@ nutrients=readmet('/Users/Povilas/Dropbox/Projects/2015-Metformin/Biolog/Biolog_
 alldeletions=readdel('{}/Deletions.csv'.format(odir))
 
 
+settings={'Rep1': [[0.02,1,0.345,0.4], [7,7]],
+          'Rep2': [[0.02,1,0.25,0.5], [7,7]],
+          'Rep3': [[0.02,1,0.33,0.5], [7,7]]}
 
 #Analyse multiple images
 #thresholds=[0.05,1,0.355,0.4]
 #sizes=[3,1,3,1]
-
-
-thresholds=[0.02,1,0.355,0.4]
-sizes=[7,7]
-
-minimage=1
-maximage=96
-maxpix=0
-data=[]
-
-plot=True
-saveimg=True
-
-
-files=["PM1_{}.tif".format(str(im).zfill(3)) for im in range(minimage,maximage+1)]
-
-
-
-
-rowslices=slice_list(files,8) #Slice list to 8 row slices
-
-
-for file in files:
-	fpat, fname, ftype = filename(file)
-	print file
-	location = "{}/{}/{}/{}".format(sourceloc,replicate,plate,file)
-
-	image,v_opening,h_opening,img2hsv,img2rgb=thresholding(location,thresholds,sizes)
-
-	histinfo_o = exposure.histogram(image)
-	histinfo_t = exposure.histogram(img2rgb)
-	histinfo_t[0][0] = 0
-
-	h =image[:,:,0]
-	s =image[:,:,1]
-	v =image[:,:,2]
-
-	#h2 =img2[:,:,0]
-	#s2 =img2[:,:,1]
-	v2 =img2hsv[:,:,2]
-
-	if plot:
-		fig, axes = plt.subplots(nrows=3, ncols=2, figsize=(8.27,11.69), dpi=100)
-		fig.suptitle(fname)
-		plt.subplots_adjust(left=0.1, bottom=0.1, right=0.95, top=0.9, wspace=0.2, hspace=0.2)
-
-		plt.sca(axes[0,0]);ax = axes[0,0]
-		plt.imshow(image);plt.title('Original')
-		plt.sca(axes[0,1]);ax = axes[0,1]
-		plt.imshow(v*10);plt.title('Brightness original')
-		plt.sca(axes[1,0]);ax = axes[1,0]
-		plt.imshow(img2hsv);plt.title('Mask based on hue and brightness')
-		plt.sca(axes[1, 1]);ax = axes[1, 1]
-		plt.imshow(v2);plt.title('Extract')
-
-		plt.sca(axes[2,0]);ax=axes[2,0]
-		plt.plot(histinfo_o[1]/255.0,histinfo_o[0]);plt.title("Brightness histogram - Original");plt.xlabel("Brightness");plt.ylabel("Pixels");plt.xlim([0,0.1])
-		plt.sca(axes[2,1]);ax=axes[2,1]
-		plt.plot(histinfo_t[1],histinfo_t[0]);plt.title("Brightness histogram - Thresholding");plt.xlabel("Brightness");plt.ylabel("Pixels");plt.xlim([0,1])
-
-
-		fig.tight_layout()
-		if saveimg:
-			fig.savefig('{}/{}_{}_analysis.pdf'.format(odir,replicate,fname), bbox_inches='tight')
-		plt.close(fig)
-
-	bright1D=[el for el in list(v2.ravel()) if el>0]
-	if len(bright1D)>maxpix:
-		maxpix=len(bright1D)
-	row=[fname]+thresholds+sizes+bright1D
-	data.append(row)
-
-
-maxpix
-
-
-header=['File','Brightness_min','Brightness_max','Hue_min','Hue_max','Bright_opening','Bright_dilation','Hue_opening','Hue_dilation']+range(1,maxpix+1)
-data.insert(0,header)
-
-
-
-ofile='{}/Summary.csv'.format(odir)
-
-writecsv(data,ofile)
-
-
-
-
-
 
 
 
@@ -487,16 +426,36 @@ writecsv(data,ofile)
 #
 #sourceloc="2017-05-17_Trial"
 
-thresholds=[0.05,1,0.355,0.4]
-sizes=[7,7]
+
+replicate="Rep2"
+plate="PM1"
+
+plate='Control_1930'
+
+
+
+
+thresholds,sizes=settings[replicate]
+
+#hstep=0.01
+#hmin=0.3
+#hmax=0.4
+#
+#bstep=0.005
+#bmin=0.01
+#bmax=0.05
+
+
 
 hstep=0.01
-hmin=0.2
-hmax=0.3
+hmin=0.05
+hmax=0.15
 
-bstep=0.005
+bstep=0.01
 bmin=0.01
-bmax=0.05
+bmax=0.08
+
+
 
 hues=np.arange(hmin,hmax+hstep,hstep)
 brights=np.arange(bmin,bmax+bstep,bstep)
@@ -506,8 +465,6 @@ totalf=len(brights)*len(hues)
 
 #files=["image_{}.tif".format(str(im).zfill(3)) for im in range(minimage,maximage+1)]
 
-replicate="Rep2"
-plate="PM1"
 #imid=33
 
 
@@ -518,15 +475,11 @@ filenum=[1,2,9,28,33]
 
 files=["{}_{}.tif".format(plate,str(imid).zfill(3)) for imid in filenum]
 
+
+
 data=[]
 
 sizei=sizes
-
-#size_v_opening=[3,4]
-#size_v_dilation=[1,2]
-#size_h_opening=[3,4]
-#size_h_dilation=[1,2]
-#Next run
 
 size_v_closing=[7]
 size_h_closing=[7]
@@ -545,11 +498,19 @@ for svc in size_v_closing:
             fpat, fname, ftype = filename(file)
             print file
             location = "{}/{}/{}/{}".format(sourceloc,replicate,plate,file)
+            
             well=indx2well(int(fname.split('_')[1]),start=1)
             fig, axes = plt.subplots(nrows=len(brights), ncols=len(hues),sharex=True, sharey=True, figsize=(40,24), dpi=300)
             fig.suptitle('{} - {} | {}'.format(fname,well,nutrients[plate][well]['Metabolite']))
             #plt.subplots_adjust(left=0.1, bottom=0.1, right=0.95, top=0.5, wspace=0, hspace=0)
             ind=0.0
+            
+            image = tiff.imread(location)
+            imghsv=color.rgb2hsv(image)
+            #imgrgb=color.hsv2rgb(imghsv)
+            
+            v=imghsv[:,:,2]
+            
             for bi, bval in enumerate(brights):
                 for hi,hval in enumerate(hues):
                     
@@ -566,13 +527,13 @@ for svc in size_v_closing:
                         delworms=alldeletions[replicate][plate][indx]['Worms']
                     else:
                         delworms=[]
-        
-                    image,imgrgb,v_closing,h_closing,img2hsv,img2rgb=thresholding2(location,thresi,sizei,delworms)
+                        
+                    #v_closing,h_closing,img2hsv,img2rgb=thresholding2(imghsv,thresi,sizei,delworms)
+                    labeled_worms=labeling(v,bval,hval)
                     
-                    #image,imgrgb,v_closing,h_closing,img2hsv,img2rgb=thresholding2(location,thresi,sizes)
-                    #image,imgrgb,v_closing,h_closing,img2hsv,img2rgb=thresholding3(location,thresi,sizes,2)
                     plt.sca(axes[bi, hi]);ax = axes[bi, hi]
-                    plt.imshow(img2hsv)
+                    #plt.imshow(img2hsv)
+                    plt.imshow(labeled_worms)
                     plt.setp(ax.get_yticklabels(), visible=False)
                     plt.setp(ax.get_xticklabels(), visible=False)
         
@@ -588,128 +549,10 @@ for svc in size_v_closing:
                     print '{:}:{:6.1f}% |{:6.1f}%'.format(fname,prcf,prco)
         
             #fig.tight_layout()
-            fig.savefig('{}/{}_{}_{}_parameters.pdf'.format(odir,replicate,fname,sizestr), bbox_inches='tight')
+            fig.savefig('{}/{}_{}_{}_labeling.pdf'.format(odir,replicate,fname,sizestr), bbox_inches='tight')
             plt.close(fig)
-
-#==============================================================================
-# End Block
-#==============================================================================
-
-
-#==============================================================================
-# Mark sick worms
-#==============================================================================
-
-#def onclick(event):
-#    global ix, iy
-#    global coords
-#    #global worms
-#    #coords=[]
-#
-#    ix, iy = event.xdata, event.ydata
-#    print 'x = %d, y = %d'%(ix, iy)
-#    coords.append([ix, iy])
-#
-#    #if len(coords) == 2:
-#    fig.canvas.mpl_disconnect(cid)
-#                    
-#    return coords
-
-
-
-deletions={'Rep1-PM1':[3,29,33,41,44,57,62,93],
-           'Rep1-PM2A':[30,40,41,45,47,48,75],
-           'Rep1-PM3B':[10,31,33,41,90],
-           'Rep1-PM4A':[32,58,82]}
-
-dfiles=[ "{}/{}/{}/{}_{}.tif".format(sourceloc,replicate,plate,plate,str(im).zfill(3)) for im in  deletions.iteritems()]
-
-thresi=[0.02,1,0.345,0.4]
-sizei=[7,7]
-
-
-
-#from matplotlib.patches import Rectangle
-
-deldata=[]
-plt.ion() ## Note this correction
-for dkey in deletions.keys():
-    rep,plate=dkey.split('-')
-    dfiles=deletions[dkey]
-    for indx in dfiles:
-        dfile="{}/{}/{}/{}_{}.tif".format(sourceloc,rep,plate,plate,str(indx).zfill(3))
-        dname=os.path.basename(dfile)
-        well=indx2well(indx)
-        
-        
-        print rep,plate,well,dname
-        
-        
-        
-        image,imgrgb,v_closing,h_closing,img2hsv,img2rgb=thresholding2(dfile,thresi,sizei)
-        
-        #v=img2hsv[:,:,2]
-        #plt.imshow(s_img2hsv[822:964,749:1014,:])
-        worms=[]
-        coords=[]
-        fig,axes=plot_comparison(imgrgb,img2hsv,'Pick worms: {}'.format(dname))
-
-        while True:
-            #while len(coords)<2:
-            coords=plt.ginput(2)
-            print coords
             
-            x1,y1=coords[0]
-            x2,y2=coords[1]
             
-            xs=[x1,x2]
-            ys=[y1,y2]
-            
-            excordt=[x1,y1,x2,y2]
-            excord=[int(c) for c in excordt]
-            
-            #ax2=axes[1]
-            #ax2.add_patch(Rectangle(( max(xs)- min(xs), max(ys) -min(ys)), 0.2, 0.2,
-            #          alpha=0.5, facecolor='none'))
-            #fig.canvas.draw()
-            #cid = fig.canvas.mpl_connect('button_press_event', onclick)
-            #plt.waitforbuttonpress()
-            #print coords,cid
-            
-            #plt.pause(0.05)
-            save=raw_input("Save coordinates (y/n)?: ")
-            if save=='y':
-                worms.append(excord)
-                coords=[]
-                multi=raw_input("Mark other worms (y/n)?: ")
-                if multi=='y':
-                    continue
-                else:
-                    break
-            else:
-                coords=[]
-                multi=raw_input("Mark other worm (y/n)?: ")
-                if multi=='y':
-                    continue
-                else:
-                    break
-            
-        headr=[rep,plate,indx,dname]
-        for worm in worms:
-            deldata.append(headr+worm)
-        plt.close(fig)
-
-
-header=['Replicate','Plate','Index','File','X1','Y1','X2','Y2']
-deldata.insert(0,header)
-
-#ofile='{}/Deletions.csv'.format(odir)
-#writecsv(deldata,ofile)
-
-
-
-
-
 
 
 #==============================================================================
@@ -725,34 +568,35 @@ ttlsize=24
 #sizes=[7,7]
 
 
-thresholds=[0.02,1,0.25,0.5]
-sizes=[7,7]
-
-
 minimage=1
 maximage=96
 
 
-thresi=thresholds
-sizei=sizes
-
-thrstr='|'.join([str(th) for th in thresi])
-sizestr='|'.join([str(sz) for sz in sizei])
-
-
-
-replicate='Rep2'
+replicate='Rep3'
 plates=['PM1','PM2A','PM3B','PM4A']
 
 plate=plates[0]
 
-figures=['Original','Mask']
+figures=['Original','Mask','Labeling']
+
+figures=['Labeling']
+
+thresi,sizei=settings[replicate]
+thrstr='|'.join([str(th) for th in thresi])
+sizestr='|'.join([str(sz) for sz in sizei])
 
 
+thr_1,thr_2=[0.01,0.07]
+
+lthrstr='{}|{}'.format(thr_1,thr_2)
 
 data=[]
 
 maxpix=0
+
+
+#files=["{}_{}.tif".format('NGM_NoMetf',str(imid).zfill(3)) for imid in range(1,9)]+["{}_{}.tif".format('NGM_Metf',str(imid).zfill(3)) for imid in range(1,9)]
+#plates=['Control_1930']
 
 #plates=['PM1']
 indo=0.0
@@ -769,6 +613,7 @@ for plate in plates:
         axall.append(axes)
     row=0
     col=0
+    
     for flin,fln in enumerate(files):
         fpat, fname, ftype = filename(fln)
         #print plate, fln, row, col
@@ -779,16 +624,9 @@ for plate in plates:
             delworms=alldeletions[replicate][plate][indx]['Worms']
         else:
             delworms=[]
-        
-        image,imgrgb,v_closing,h_closing,img2hsv,img2rgb=thresholding2(location,thresi,sizei,delworms)
-        #image = tiff.imread(location)
-        #imghsv=color.rgb2hsv(image)
-        #imgrgb=color.hsv2rgb(imghsv)
-        #h =imghsv[:,:,0]
-        #s =imghsv[:,:,1]
-        v2 =img2hsv[:,:,2]
-        
-        #Collect data
+            
+        image = tiff.imread(location)
+        imghsv = color.rgb2hsv(image)
         
         well=indx2well(flin)
         ttl='{}-{} | {}'.format(flin+1,well,nutrients[plate][well]['Metabolite'])
@@ -811,21 +649,29 @@ for plate in plates:
                 sys.exit(1)
             
             if fign=='Original':
+                imgrgb=color.hsv2rgb(imghsv)
                 plt.imshow(imgrgb)
             elif fign=='Mask':
+                v_closing,h_closing,img2hsv,img2rgb=thresholding2(imghsv,thresi,sizei,delworms)
                 plt.imshow(img2hsv)
+            elif fign=='Labeling':
+                v=imghsv[:,:,2]
+                labeled_worms=labeling(v,thr_1,thr_2)
+                plt.imshow(labeled_worms)
             else:
-                plt.imshow(image)
+                plt.imshow(imgrgb)
             
             plt.title(ttlw,fontsize=ttlsize)
             plt.setp(ax.get_yticklabels(), visible=False)
             plt.setp(ax.get_xticklabels(), visible=False)
             
-        bright1D=[el for el in list(v2.ravel()) if el>0]
-        ftable=freqtable(bright1D)
-        rowhead=[replicate,plate,well,fln]#+thresi+sizei
-        for fv in ftable:
-            data.append(rowhead+fv)
+        if fign=='Mask':
+            v2 =img2hsv[:,:,2]
+            bright1D=[el for el in list(v2.ravel()) if el>0]
+            ftable=freqtable(bright1D)
+            rowhead=[replicate,plate,well,fln]#+thresi+sizei
+            for fv in ftable:
+                data.append(rowhead+fv)
         
         col=col+1
         if col==12:
@@ -848,15 +694,17 @@ for plate in plates:
             ofignm='{}/{}_{}_{}.pdf'.format(odir,replicate,plate,fign)
         elif fign=='Mask':
             ofignm='{}/{}_{}_{}_{}_{}.pdf'.format(odir,replicate,plate,thrstr,sizestr,fign)
+        elif fign=='Labeling':
+            ofignm='{}/{}_{}_{}_{}.pdf'.format(odir,replicate,plate,lthrstr,fign)
         else:
             ofignm='{}/{}_{}_{}.pdf'.format(odir,replicate,plate,fign)
         fig.savefig(ofignm, bbox_inches='tight')
         plt.close(fig)
 
+
+
 header=['Replicate','Plate','Well','File','Brightness_value','Frequency']
 data.insert(0,header)
-
-
 f=open('{}/Summary_{}_{}_{}.csv'.format(odir,replicate,thrstr,sizestr),"wb")
 ofile=csv.writer(f, delimiter='\t') # dialect='excel',delimiter=';', quotechar='"', quoting=csv.QUOTE_ALL
 for row in data:
@@ -866,19 +714,142 @@ f.close()
 
 
 
+##########
+#Just get the data
+##########
+
+replicate='Rep2'
+thresi,sizei=settings[replicate]
+
+
+files=["{}_{}.tif".format('NGM_NoMetf',str(imid).zfill(3)) for imid in range(1,9)]+["{}_{}.tif".format('NGM_Metf',str(imid).zfill(3)) for imid in range(1,9)]
+folders=['Controls_1930','Controls_2240']
+
+data=[]
+
+#plates=['PM1']
+indo=0.0
+
+fig, axes = plt.subplots(nrows=4, ncols=8, figsize=(72,47), dpi=300)
+fig.suptitle('Negative controls',fontsize=40)
+plt.subplots_adjust(left=0.1, bottom=0.1, right=0.95, top=2, wspace=0.5, hspace=0.1)
+
+
+row=0
+col=0
+
+for folder in folders:
+    #files=["{}_{}.tif".format(plate,str(im).zfill(3)) for im in range(1,96+1)]
+    total=len(folders)*len(files)
+
+    for flin,fln in enumerate(files):
+        fpat, fname, ftype = filename(fln)
+        location = "{}/{}/{}/{}".format(sourceloc,replicate,folder,fln)
+        if os.path.exists(location):
+            image = tiff.imread(location)
+            imghsv = color.rgb2hsv(image)
+            imgrgb = color.hsv2rgb(imghsv)
+            v_closing,h_closing,img2hsv,img2rgb=thresholding2(imghsv,thresi,sizei,[])
+
+    
+            v2 =img2hsv[:,:,2]
+            bright1D=[el for el in list(v2.ravel()) if el>0]
+            ftable=freqtable(bright1D)
+            rowhead=[replicate,folder,fln]#+thresi+sizei
+            for fv in ftable:
+                data.append(rowhead+fv)
+                
+        try:
+            plt.sca(axes[row,col])
+        except Exception as e:
+            print e
+            sys.exit(1)
+        try:
+            ax = axes[row,col]
+        except Exception as e:
+            print e
+            sys.exit(1)
+        
+        plt.imshow(imgrgb)
+        if col == 0:
+            ax.yaxis.set_label_position("left")
+            plt.ylabel('{}_{}'.format(folder,'-'.join(fname.split('_')[0:1])), rotation='vertical')
+        
+            
+        col=col+1
+        if col==8:
+            col=0
+            row=row+1
+            
+        indo=indo+1
+        prc=(flin+1)*100.0/len(files)        
+        prco=(indo)*100.0/total
+        print '{:} {:} {:}:{:6.1f}% | {:6.1f}%'.format(replicate,plate,fname,prc,prco)
+
+
+fig.tight_layout() 
+ofignm='{}/Negative_Controls_comparison.pdf'.format(odir)
+fig.savefig(ofignm, bbox_inches='tight')
+plt.close(fig)       
+        
+        
+
+
+header=['Replicate','Folder','File','Brightness_value','Frequency']
+data.insert(0,header)
+f=open('{}/Summary_{}_{}_{}_Negative_controls.csv'.format(odir,replicate,thrstr,sizestr),"wb")
+ofile=csv.writer(f, delimiter='\t') # dialect='excel',delimiter=';', quotechar='"', quoting=csv.QUOTE_ALL
+for row in data:
+	#row = [item.encode("utf-8") if isinstance(item, unicode) else str(item) for item in row]
+	ofile.writerow(row)
+f.close()
+
+
+
+
+#Check controls
+
+
+replicate='Rep2'
+folder='Controls_1930'
+indx=2
+#rfile="{}/{}/NGM_Control_Rep1.tif".format(sourceloc,replicate)
+tfile="{}/{}/{}/{}_{}.tif".format(sourceloc,replicate,folder,'NGM_NoMetf',str(indx).zfill(3))
+
+
+thresi,sizei=settings[replicate]
+
+    
+image = tiff.imread(tfile)
+imghsv=color.rgb2hsv(image)
+imgrgb=color.hsv2rgb(imghsv)
+
+v_closing,h_closing,img2hsv,img2rgb=thresholding2(imghsv,thresi,sizei,[])
+
+
+#plt.imshow(imgrgb)
+
+
+plt.imshow(img2hsv)
+
+
+
 
 
 
 #alldeletions=readdel('{}/Deletions.csv'.format(odir))
+from skimage.filters import threshold_otsu, threshold_adaptive
+from skimage.filters import rank
+from skimage.feature import peak_local_max
 
-replicate='Rep1'
+replicate='Rep3'
 plate='PM1'
-indx=33
+indx=3
 #rfile="{}/{}/NGM_Control_Rep1.tif".format(sourceloc,replicate)
 tfile="{}/{}/{}/{}_{}.tif".format(sourceloc,replicate,plate,plate,str(indx).zfill(3))
 
 
-thresi=[0.03,1,0.347,0.4]
+thresi=[0.02,1,0.33,0.4]
 sizei=[7,7]
 alpha=2
 
@@ -887,18 +858,132 @@ if indx in alldeletions[replicate][plate].keys():
     delworms=alldeletions[replicate][plate][33]['Worms']
 else:
     delworms=[]
+    
+image = tiff.imread(tfile)
+imghsv=color.rgb2hsv(image)
+imgrgb=color.hsv2rgb(imghsv)
 
-
-image,imgrgb,v_closing,h_closing,img2hsv,img2rgb=thresholding2(tfile,thresi,sizei,delworms)
+#v_closing,h_closing,img2hsv,img2rgb=thresholding2(imghsv,thresi,sizei,delworms)
 
 #s_image,s_imgrgb,s_v_closing,s_h_closing,s_img2hsv,s_img2rgb=thresholding3(tfile,thresi,sizei,alpha,delworms)
 
+#Watershed labelling
+
+
+plt.imshow(imgrgb)
+
+
+plt.imshow(imghsv)
+
+
+h=imghsv[:,:,0]
+s=imghsv[:,:,1]
+v=imghsv[:,:,2]
+
+
+dh = rank.median(h, disk(2))
+dv = rank.median(v, disk(2))
+
+#v=imghsv[:,:,0]
+
+plt.imshow(h)
+
+
+
+
+thr_1,thr_2=[0.27,0.33]
+
+thr_1,thr_2=[0.01,0.07]
+
+
+markers = np.zeros_like(v)
+
+markers[v < thr_1] = 1
+markers[v > thr_2] = 2
+plt.imshow(markers)
+
+#markers[np.logical_not(binary_adaptive)] = 1
+#markers[binary_adaptive] = 2
+
+#elevation_map = canny(h)
+elevation_map = sobel(v)
+plt.imshow(elevation_map)
+
+segmentation = watershed(elevation_map, markers)
+segmentation = ndi.binary_fill_holes(segmentation - 1)
+plt.imshow(segmentation)
+labeled_worms, _ = ndi.label(segmentation)
+
+plt.imshow(labeled_worms)
+
+
+
+imgsel=labeled_worms[400:700,700:1200]
+plt.imshow(imgsel)
+
+
+distance = ndi.distance_transform_edt(imgsel)
+plt.imshow(distance)
+
+
+
+local_maxi = peak_local_max(distance, indices=False,
+                            footprint=np.ones((3, 3)),
+                            labels=imgsel)
+plt.imshow(local_maxi)
+markers = ndi.label(local_maxi)[0]
+labels = watershed(-distance, markers, mask=imgsel)
+
+plt.imshow(labels)
+
+
+#labeled_worms=labeling(v,0.02,0.08)
+
+x, y = np.indices((80, 80))
+x1, y1, x2, y2 = 28, 28, 44, 52
+r1, r2 = 16, 20
+mask_circle1 = (x - x1)**2 + (y - y1)**2 < r1**2
+mask_circle2 = (x - x2)**2 + (y - y2)**2 < r2**2
+image = np.logical_or(mask_circle1, mask_circle2)
+
+    
+
+#Canny filter does not work
+edges = canny(v)
+plt.imshow(edges)
+
+fill_worms = ndi.binary_fill_holes(edges)
+plt.imshow(fill_worms)
+
+
+label_objects, nb_labels = ndi.label(fill_worms)
+sizes = np.bincount(label_objects.ravel())
+mask_sizes = sizes > 20
+mask_sizes[0] = 0
+worms_cleaned = mask_sizes[label_objects]
+
+plt.imshow(worms_cleaned)
+
+
+#Other testing
 v=img2hsv[:,:,2]
 #s_v=s_img2hsv[:,:,2]
 
 figs=[imgrgb,v_closing,h_closing,img2hsv,v]
 labels=['Original','V_Mask','H_Mask','Mask','Extract']
 fig=plot_comparison(figs,labels)
+
+
+#Adaptive thresholding
+
+#block_size = 25
+#binary_adaptive = threshold_adaptive(h, block_size,offset=0.01)#, offset=10
+#plt.imshow(binary_adaptive)
+#imgrgb_t=imgrgb.copy()
+#
+#
+#imgrgb_t[binary_adaptive,:]=0;
+#plt.imshow(imgrgb_t)
 
 
 #fig = plt.figure()
@@ -1010,6 +1095,216 @@ filter_blurred_l = ndimage.gaussian_filter(image, 1)
 alpha = 30
 sharpened = image + alpha * (image - filter_blurred_l)
 plt.imshow(sharpened)
+
+
+
+
+
+#testing
+
+thresholds=[0.02,1,0.355,0.4]
+sizes=[7,7]
+
+minimage=1
+maximage=96
+maxpix=0
+data=[]
+
+plot=True
+saveimg=True
+
+
+files=["PM1_{}.tif".format(str(im).zfill(3)) for im in range(minimage,maximage+1)]
+
+
+
+
+rowslices=slice_list(files,8) #Slice list to 8 row slices
+
+
+for file in files:
+	fpat, fname, ftype = filename(file)
+	print file
+	location = "{}/{}/{}/{}".format(sourceloc,replicate,plate,file)
+
+	image,v_opening,h_opening,img2hsv,img2rgb=thresholding(location,thresholds,sizes)
+
+	histinfo_o = exposure.histogram(image)
+	histinfo_t = exposure.histogram(img2rgb)
+	histinfo_t[0][0] = 0
+
+	h =image[:,:,0]
+	s =image[:,:,1]
+	v =image[:,:,2]
+
+	#h2 =img2[:,:,0]
+	#s2 =img2[:,:,1]
+	v2 =img2hsv[:,:,2]
+
+	if plot:
+		fig, axes = plt.subplots(nrows=3, ncols=2, figsize=(8.27,11.69), dpi=100)
+		fig.suptitle(fname)
+		plt.subplots_adjust(left=0.1, bottom=0.1, right=0.95, top=0.9, wspace=0.2, hspace=0.2)
+
+		plt.sca(axes[0,0]);ax = axes[0,0]
+		plt.imshow(image);plt.title('Original')
+		plt.sca(axes[0,1]);ax = axes[0,1]
+		plt.imshow(v*10);plt.title('Brightness original')
+		plt.sca(axes[1,0]);ax = axes[1,0]
+		plt.imshow(img2hsv);plt.title('Mask based on hue and brightness')
+		plt.sca(axes[1, 1]);ax = axes[1, 1]
+		plt.imshow(v2);plt.title('Extract')
+
+		plt.sca(axes[2,0]);ax=axes[2,0]
+		plt.plot(histinfo_o[1]/255.0,histinfo_o[0]);plt.title("Brightness histogram - Original");plt.xlabel("Brightness");plt.ylabel("Pixels");plt.xlim([0,0.1])
+		plt.sca(axes[2,1]);ax=axes[2,1]
+		plt.plot(histinfo_t[1],histinfo_t[0]);plt.title("Brightness histogram - Thresholding");plt.xlabel("Brightness");plt.ylabel("Pixels");plt.xlim([0,1])
+
+
+		fig.tight_layout()
+		if saveimg:
+			fig.savefig('{}/{}_{}_analysis.pdf'.format(odir,replicate,fname), bbox_inches='tight')
+		plt.close(fig)
+
+	bright1D=[el for el in list(v2.ravel()) if el>0]
+	if len(bright1D)>maxpix:
+		maxpix=len(bright1D)
+	row=[fname]+thresholds+sizes+bright1D
+	data.append(row)
+
+
+maxpix
+
+
+header=['File','Brightness_min','Brightness_max','Hue_min','Hue_max','Bright_opening','Bright_dilation','Hue_opening','Hue_dilation']+range(1,maxpix+1)
+data.insert(0,header)
+
+
+
+ofile='{}/Summary.csv'.format(odir)
+
+writecsv(data,ofile)
+
+
+
+#==============================================================================
+# Mark sick worms
+#==============================================================================
+
+#def onclick(event):
+#    global ix, iy
+#    global coords
+#    #global worms
+#    #coords=[]
+#
+#    ix, iy = event.xdata, event.ydata
+#    print 'x = %d, y = %d'%(ix, iy)
+#    coords.append([ix, iy])
+#
+#    #if len(coords) == 2:
+#    fig.canvas.mpl_disconnect(cid)
+#                    
+#    return coords
+
+
+
+deletions={'Rep1-PM1':[3,29,33,41,44,57,62,93],
+           'Rep1-PM2A':[30,40,41,45,47,48,75],
+           'Rep1-PM3B':[10,31,33,41,90],
+           'Rep1-PM4A':[32,58,82]}
+
+dfiles=[ "{}/{}/{}/{}_{}.tif".format(sourceloc,replicate,plate,plate,str(im).zfill(3)) for im in  deletions.iteritems()]
+
+thresi=[0.02,1,0.345,0.4]
+sizei=[7,7]
+
+
+
+#from matplotlib.patches import Rectangle
+
+deldata=[]
+plt.ion() ## Note this correction
+for dkey in deletions.keys():
+    rep,plate=dkey.split('-')
+    dfiles=deletions[dkey]
+    
+    thresi,sizei=settings[rep]
+    for indx in dfiles:
+        dfile="{}/{}/{}/{}_{}.tif".format(sourceloc,rep,plate,plate,str(indx).zfill(3))
+        dname=os.path.basename(dfile)
+        well=indx2well(indx)
+        
+        
+        print rep,plate,well,dname
+        
+        image = tiff.imread(location)
+        imghsv=color.rgb2hsv(image)
+        imgrgb=color.hsv2rgb(imghsv)
+        
+        
+        
+        v_closing,h_closing,img2hsv,img2rgb=thresholding2(imghsv,thresi,sizei,delworms)
+        
+        #v=img2hsv[:,:,2]
+        #plt.imshow(s_img2hsv[822:964,749:1014,:])
+        worms=[]
+        coords=[]
+        fig,axes=plot_comparison(imgrgb,img2hsv,'Pick worms: {}'.format(dname))
+
+        while True:
+            #while len(coords)<2:
+            coords=plt.ginput(2)
+            print coords
+            
+            x1,y1=coords[0]
+            x2,y2=coords[1]
+            
+            xs=[x1,x2]
+            ys=[y1,y2]
+            
+            excordt=[x1,y1,x2,y2]
+            excord=[int(c) for c in excordt]
+            
+            #ax2=axes[1]
+            #ax2.add_patch(Rectangle(( max(xs)- min(xs), max(ys) -min(ys)), 0.2, 0.2,
+            #          alpha=0.5, facecolor='none'))
+            #fig.canvas.draw()
+            #cid = fig.canvas.mpl_connect('button_press_event', onclick)
+            #plt.waitforbuttonpress()
+            #print coords,cid
+            
+            #plt.pause(0.05)
+            save=raw_input("Save coordinates (y/n)?: ")
+            if save=='y':
+                worms.append(excord)
+                coords=[]
+                multi=raw_input("Mark other worms (y/n)?: ")
+                if multi=='y':
+                    continue
+                else:
+                    break
+            else:
+                coords=[]
+                multi=raw_input("Mark other worm (y/n)?: ")
+                if multi=='y':
+                    continue
+                else:
+                    break
+            
+        headr=[rep,plate,indx,dname]
+        for worm in worms:
+            deldata.append(headr+worm)
+        plt.close(fig)
+
+
+header=['Replicate','Plate','Index','File','X1','Y1','X2','Y2']
+deldata.insert(0,header)
+
+#ofile='{}/Deletions.csv'.format(odir)
+#writecsv(deldata,ofile)
+
+
+
 
 
 
