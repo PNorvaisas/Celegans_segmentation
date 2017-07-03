@@ -490,8 +490,8 @@ figures = ['Labeling']
 
 #plates = ['PM1']
 plates=['PM1','PM2A','PM3B','PM4A']
-#replicates = ['Rep1', 'Rep2', 'Rep3', 'Rep4']
-replicates = ['Rep1']
+replicates = ['Rep1', 'Rep2', 'Rep3', 'Rep4']
+#replicates = ['Rep1']
 
 #np.set_printoptions(formatter={'float': lambda x: "{0:.3f}".format(x)})
 np.set_printoptions(precision=3)
@@ -509,10 +509,9 @@ cthres=0.02
 
 for replicate in replicates:
 	label = 'auto_threshold'
+	platesel = plates[:]
 	if replicate == 'Rep4':
-		platesel = plates.remove('PM2A')
-	else:
-		platesel=plates
+		platesel.remove('PM2A')
 
 	for plate in platesel:
 		mthres = manual[replicate[3]][plate]
@@ -602,7 +601,7 @@ for replicate in replicates:
 					try:
 						ax = axes[row, col]
 					except Exception as e:
-						3print e
+						print e
 						sys.exit(1)
 					#ax.axis('off')
 					ax.set_adjustable('box-forced')

@@ -368,10 +368,9 @@ cthres=0.02
 
 for replicate in replicates:
 	label = 'auto_threshold'
+	platesel = plates[:]
 	if replicate == 'Rep4':
-		platesel = plates.remove('PM2A')
-	else:
-		platesel=plates
+		platesel.remove('PM2A')
 
 	for plate in platesel:
 		mthres = manual[replicate[3]][plate]
