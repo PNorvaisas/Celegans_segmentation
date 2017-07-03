@@ -342,15 +342,16 @@ maximage = 96
 maxpix = 0
 
 data = []
+thresholds=[]
 # figures=['Original','Labeling']
 figures = ['Original']
 
 figures = ['Labeling']
 
-
+#plates = ['PM1']
 plates=['PM1','PM2A','PM3B','PM4A']
-replicates = ['Rep4','Rep1', 'Rep2', 'Rep3']
-
+replicates = ['Rep1', 'Rep2', 'Rep3', 'Rep4']
+#replicates = ['Rep1']
 
 #np.set_printoptions(formatter={'float': lambda x: "{0:.3f}".format(x)})
 np.set_printoptions(precision=3)
@@ -365,9 +366,10 @@ indo = 0.0
 sthres=1000
 cthres=0.02
 
+label = 'auto_threshold'
 
 for replicate in replicates:
-	label = 'auto_threshold'
+
 	platesel = plates[:]
 	if replicate == 'Rep4':
 		platesel.remove('PM2A')
@@ -409,19 +411,28 @@ for replicate in replicates:
 
 			imghsv = color.rgb2hsv(imgclean)
 			imgrgb = color.hsv2rgb(imghsv)
+			rhead = [replicate, plate, well, fln]
 
 			if 'Labeling' in figures:
-				if indx in mthres.keys():
-					hthres=mthres[indx]
+				h = imghsv[:, :, 0]
+				v1D = np.around(h.ravel(), 3)
+				ftable = np.array(freqtable(v1D))
+				ftable = ftable[np.argsort(ftable[:, 0])]
+				X, Y, mu, sd = fitgauss(ftable[:, 0], ftable[:, 1])
+				# What hue threshold o use
+
+				mthr=mthres[indx] if indx in mthres.keys() else ''
+				hthr=mu * 0.995318 + sd * 0.427193 + 0.020434
+
+				if mthr!='':
+					hthres = mthr
 				else:
-					h = imghsv[:, :, 0]
-					v1D = np.around(h.ravel(), 3)
-					ftable = np.array(freqtable(v1D))
-					ftable = ftable[np.argsort(ftable[:, 0])]
-					X, Y, mu, sd = fitgauss(ftable[:, 0], ftable[:, 1])
-					# What hue threshold to use
-					hthres = mu * 0.995318 + sd * 0.427193 + 0.020434
+					hthres = hthr
+
 				labeled_worms = labeling3(imghsv, hthres,cthres,sthres)
+
+
+				thresholds.append(rhead+[mu,sd,mthr,hthr])
 
 				wormind = list(np.unique(labeled_worms))
 				worms = {w: labeled_worms[labeled_worms == w].shape[0] for w in wormind}
@@ -511,12 +522,17 @@ for replicate in replicates:
 
 
 
+
 header = ['Replicate', 'Plate', 'Well', 'File', 'Worm'] + levels
 data.insert(0, header)
-# f=open('{}/Summary_{}_{}.csv'.format(odir,'All',lthrstr),"wb")
-
-
-ofname = '{}/Summary_{}_{}.csv'.format(odir, 'all_new', label)
-
+ofname = '{}/Summary_{}_{}.csv'.format(odir, 'all', label)
 writecsv(data, ofname, '\t')
+
+
+
+header = ['Replicate', 'Plate', 'Well', 'File', 'Worm'] + ['Mu','SD','Manual_t','Estimated_t']
+thresholds.insert(0, header)
+otname = '{}/Summary_{}_{}.csv'.format(odir, 'thresholds', label)
+writecsv(thresholds, otname, '\t')
+
 
