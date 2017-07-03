@@ -349,7 +349,7 @@ figures = ['Labeling']
 
 
 plates=['PM1','PM2A','PM3B','PM4A']
-replicates = ['Rep1', 'Rep2', 'Rep3', 'Rep4']
+replicates = ['Rep4','Rep1', 'Rep2', 'Rep3']
 
 
 #np.set_printoptions(formatter={'float': lambda x: "{0:.3f}".format(x)})
