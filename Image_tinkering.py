@@ -604,7 +604,7 @@ for replicate in replicates:
 					except Exception as e:
 						print e
 						sys.exit(1)
-					ax.axis('off')
+					#ax.axis('off')
 					ax.set_adjustable('box-forced')
 
 					if fign == 'Original':
