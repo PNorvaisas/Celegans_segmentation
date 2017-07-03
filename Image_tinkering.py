@@ -602,7 +602,7 @@ for replicate in replicates:
 					try:
 						ax = axes[row, col]
 					except Exception as e:
-						print e
+						3print e
 						sys.exit(1)
 					#ax.axis('off')
 					ax.set_adjustable('box-forced')

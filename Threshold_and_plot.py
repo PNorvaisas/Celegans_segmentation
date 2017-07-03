@@ -347,10 +347,10 @@ figures = ['Original']
 
 figures = ['Labeling']
 
-#plates = ['PM1']
+
 plates=['PM1','PM2A','PM3B','PM4A']
-#replicates = ['Rep1', 'Rep2', 'Rep3', 'Rep4']
-replicates = ['Rep1']
+replicates = ['Rep1', 'Rep2', 'Rep3', 'Rep4']
+
 
 #np.set_printoptions(formatter={'float': lambda x: "{0:.3f}".format(x)})
 np.set_printoptions(precision=3)
@@ -420,7 +420,7 @@ for replicate in replicates:
 					ftable = np.array(freqtable(v1D))
 					ftable = ftable[np.argsort(ftable[:, 0])]
 					X, Y, mu, sd = fitgauss(ftable[:, 0], ftable[:, 1])
-					# What hue threshold o use
+					# What hue threshold to use
 					hthres = mu * 0.995318 + sd * 0.427193 + 0.020434
 				labeled_worms = labeling3(imghsv, hthres,cthres,sthres)
 
