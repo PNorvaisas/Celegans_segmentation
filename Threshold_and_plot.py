@@ -326,7 +326,7 @@ nutrients = readmet('/home/pnorv/Dropbox/Projects/2015-Metformin/Biolog/Biolog_m
 alldeletions = readdel('{}/Deletions.csv'.format(odir))
 
 
-
+thresholds_man = readman('Thresholds_all_3.csv')
 
 # ==============================================================================
 # #@#96 well previews
@@ -344,21 +344,24 @@ maxpix = 0
 data = []
 thresholds=[]
 # figures=['Original','Labeling']
-figures = ['Original']
+#figures = ['Original']
 
 figures = ['Labeling']
 
 #plates = ['PM1']
 plates=['PM1','PM2A','PM3B','PM4A']
-replicates = ['Rep1', 'Rep2', 'Rep3', 'Rep4']
+#replicates = ['Rep2', 'Rep3', 'Rep4','Rep5','Rep6']
 #replicates = ['Rep1']
+#replicates = ['Rep5', 'Rep6']
+
+replicates = ['Rep1', 'Rep2', 'Rep3', 'Rep4','Rep5', 'Rep6']
 
 #np.set_printoptions(formatter={'float': lambda x: "{0:.3f}".format(x)})
 np.set_printoptions(precision=3)
 
 step = 0.001
 levels = ["{0:.3f}".format(lvl) for lvl in np.arange(0, 1 + step, step)]
-manual = readman('Thresholds_all.csv')
+
 
 printfigures = True
 indo = 0.0
@@ -372,10 +375,14 @@ for replicate in replicates:
 
 	platesel = plates[:]
 	if replicate == 'Rep4':
-		platesel.remove('PM2A')
+		platesel=['PM1','PM3B','PM4A']
+	elif replicate == 'Rep5':
+		platesel=['PM2A']
+	elif replicate == 'Rep6':
+		platesel=['PM1','PM2A']
 
 	for plate in platesel:
-		mthres = manual[replicate[3]][plate]
+		mthres = thresholds_man[replicate[3]][plate]
 
 		files = ["{}_{}.tif".format(plate, str(im).zfill(3)) for im in range(1, 96 + 1)]
 		total = len(plates) * len(files) * len(replicates)
@@ -422,9 +429,13 @@ for replicate in replicates:
 				# What hue threshold o use
 
 				mthr=mthres[indx] if indx in mthres.keys() else ''
-				hthr=mu * 0.995318 + sd * 0.427193 + 0.020434
 
-				if mthr!='':
+				if replicate in ['Rep1','Rep2','Rep3','Rep4']:
+					hthr=mu * 0.995318 + sd * 0.427193 + 0.020434
+				else:
+					hthr = mu * 0.995318 + sd * 0.427193 + 0.03
+
+				if mthr!='' and mthr!=0:
 					hthres = mthr
 				else:
 					hthres = hthr
@@ -525,14 +536,14 @@ for replicate in replicates:
 
 header = ['Replicate', 'Plate', 'Well', 'File', 'Worm'] + levels
 data.insert(0, header)
-ofname = '{}/Summary_{}_{}.csv'.format(odir, 'all', label)
+ofname = '{}/Summary_{}_{}.csv'.format(odir, 'all_new', label)
 writecsv(data, ofname, '\t')
 
 
 
 header = ['Replicate', 'Plate', 'Well', 'File', 'Worm'] + ['Mu','SD','Manual_t','Estimated_t']
 thresholds.insert(0, header)
-otname = '{}/Summary_{}_{}.csv'.format(odir, 'thresholds', label)
+otname = '{}/Summary_{}_{}.csv'.format(odir, 'thresholds_new', label)
 writecsv(thresholds, otname, '\t')
 
 

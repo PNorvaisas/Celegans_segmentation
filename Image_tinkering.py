@@ -6,7 +6,8 @@ import csv
 import pandas
 import matplotlib
 
-matplotlib.use('Agg') #TkAgg
+matplotlib.use('MacOSX')
+#matplotlib.use('Agg')
 #matplotlib.use('MacOSX') #TkAgg
 
 import matplotlib.pyplot as plt
@@ -325,14 +326,17 @@ nutrients = readmet('/Users/Povilas/Dropbox/Projects/2015-Metformin/Biolog/Biolo
 
 alldeletions = readdel('{}/Deletions.csv'.format(odir))
 
+
+thresholds_man = readman('Thresholds_all_3.csv')
+
 # settings={'Rep1': [[0.02,1,0.345,0.4], [7,7]],
 #          'Rep2': [[0.02,1,0.25,0.5], [7,7]],
 #          'Rep3': [[0.02,1,0.33,0.5], [7,7]]}
 
-settings = {'Rep1': [0.8771, 0.0389, 0.02],
-            'Rep2': [4.1776, -0.8177, 0.02],
-            'Rep3': [1.3487, -0.1191, 0.02],
-            'Rep4': [3.4757, -0.6754, 0.02]}
+# settings = {'Rep1': [0.8771, 0.0389, 0.02],
+#             'Rep2': [4.1776, -0.8177, 0.02],
+#             'Rep3': [1.3487, -0.1191, 0.02],
+#             'Rep4': [3.4757, -0.6754, 0.02]}
 
 # Analyse multiple images
 # thresholds=[0.05,1,0.355,0.4]
@@ -340,134 +344,6 @@ settings = {'Rep1': [0.8771, 0.0389, 0.02],
 
 
 
-# ==============================================================================
-# #@#Test parameters
-# ==============================================================================
-
-#
-# odir='2017-05-17_Trial_analysis2'
-#
-# sourceloc="2017-05-17_Trial"
-
-
-replicate = "Rep2"
-plate = "PM1"
-
-plate = 'Control_1930'
-
-thresholds, sizes = settings[replicate]
-a, b, cmin = settings[replicate]
-
-# hstep=0.01
-# hmin=0.3
-# hmax=0.4
-#
-# bstep=0.005
-# bmin=0.01
-# bmax=0.05
-
-
-
-hstep = 0.01
-hmin = 0.05
-hmax = 0.15
-
-bstep = 0.01
-bmin = 0.01
-bmax = 0.08
-
-hues = np.arange(hmin, hmax + hstep, hstep)
-brights = np.arange(bmin, bmax + bstep, bstep)
-
-totalf = len(brights) * len(hues)
-
-# files=["image_{}.tif".format(str(im).zfill(3)) for im in range(minimage,maximage+1)]
-
-# imid=33
-
-
-# files=["{}_{}.tif".format(plate,str(im).zfill(3)) for im in range(minimage,maximage+1)]
-
-# filenum=[1,2,9,15,18,28,33,35,61]
-filenum = [1, 2, 9, 28, 33]
-
-files = ["{}_{}.tif".format(plate, str(imid).zfill(3)) for imid in filenum]
-
-data = []
-
-sizei = sizes
-
-size_v_closing = [7]
-size_h_closing = [7]
-
-overall = len(files) * totalf * len(size_v_closing) * len(size_h_closing)
-print overall
-
-indo = 0.0
-for svc in size_v_closing:
-	sizei[0] = svc
-	for shc in size_h_closing:
-		sizei[1] = shc
-		sizestr = '|'.join([str(sz) for sz in sizei])
-		for file in files:
-			fpat, fname, ftype = filename(file)
-			print file
-			location = "{}/{}/{}/{}".format(sourceloc, replicate, plate, file)
-
-			well = indx2well(int(fname.split('_')[1]), start=1)
-			fig, axes = plt.subplots(nrows=len(brights), ncols=len(hues), sharex=True, sharey=True, figsize=(40, 24),
-			                         dpi=300)
-			fig.suptitle('{} - {} | {}'.format(fname, well, nutrients[plate][well]['Metabolite']))
-			# plt.subplots_adjust(left=0.1, bottom=0.1, right=0.95, top=0.5, wspace=0, hspace=0)
-			ind = 0.0
-
-			image = tiff.imread(location)
-			imghsv = color.rgb2hsv(image)
-			# imgrgb=color.hsv2rgb(imghsv)
-
-			v = imghsv[:, :, 2]
-
-			for bi, bval in enumerate(brights):
-				for hi, hval in enumerate(hues):
-
-					ind = ind + 1.0
-					indo = indo + 1.0
-					thresi = thresholds
-					thresi[0] = bval
-					thresi[2] = hval
-					thrstr = '|'.join([str(th) for th in thresi])
-
-					indx = int(fname.split('_')[1])
-					if indx in alldeletions[replicate][plate].keys():
-						print 'Deleting some worms!'
-						delworms = alldeletions[replicate][plate][indx]['Worms']
-					else:
-						delworms = []
-
-					# v_closing,h_closing,img2hsv,img2rgb=thresholding2(imghsv,thresi,sizei,delworms)
-					# labeled_worms=labeling(v,bval,hval)
-					labeled_worms = labeling2(imghsv, a, b, cmin)
-
-					plt.sca(axes[bi, hi]);
-					ax = axes[bi, hi]
-					# plt.imshow(img2hsv)
-					plt.imshow(labeled_worms)
-					plt.setp(ax.get_yticklabels(), visible=False)
-					plt.setp(ax.get_xticklabels(), visible=False)
-
-					if hi == 0:
-						ax.yaxis.set_label_position("left")
-						plt.ylabel(bval, rotation='vertical')
-					if bi == 0:
-						plt.title(hval)
-
-					prcf = ind * 100.0 / totalf
-					prco = indo * 100.0 / overall
-					print '{:}:{:6.1f}% |{:6.1f}%'.format(fname, prcf, prco)
-
-			# fig.tight_layout()
-			fig.savefig('{}/{}_{}_{}_labeling.pdf'.format(odir, replicate, fname, sizestr), bbox_inches='tight')
-			plt.close(fig)
 
 # ==============================================================================
 # #@#96 well previews
@@ -485,21 +361,24 @@ maxpix = 0
 data = []
 thresholds=[]
 # figures=['Original','Labeling']
-figures = ['Original']
+#figures = ['Original']
 
 figures = ['Labeling']
 
 #plates = ['PM1']
 plates=['PM1','PM2A','PM3B','PM4A']
-replicates = ['Rep1', 'Rep2', 'Rep3', 'Rep4']
+#replicates = ['Rep1', 'Rep2', 'Rep3', 'Rep4','Rep5', 'Rep6']
 #replicates = ['Rep1']
+#replicates = ['Rep5', 'Rep6']
+replicates = ['Rep1', 'Rep2', 'Rep3', 'Rep4','Rep5', 'Rep6']
+
 
 #np.set_printoptions(formatter={'float': lambda x: "{0:.3f}".format(x)})
 np.set_printoptions(precision=3)
 
 step = 0.001
 levels = ["{0:.3f}".format(lvl) for lvl in np.arange(0, 1 + step, step)]
-manual = readman('Thresholds_all.csv')
+
 
 printfigures = True
 indo = 0.0
@@ -513,10 +392,14 @@ for replicate in replicates:
 
 	platesel = plates[:]
 	if replicate == 'Rep4':
-		platesel.remove('PM2A')
+		platesel=['PM1','PM3B','PM4A']
+	elif replicate == 'Rep5':
+		platesel=['PM2A']
+	elif replicate == 'Rep6':
+		platesel=['PM1','PM2A']
 
 	for plate in platesel:
-		mthres = manual[replicate[3]][plate]
+		mthres = thresholds_man[replicate[3]][plate]
 
 		files = ["{}_{}.tif".format(plate, str(im).zfill(3)) for im in range(1, 96 + 1)]
 		total = len(plates) * len(files) * len(replicates)
@@ -563,9 +446,13 @@ for replicate in replicates:
 				# What hue threshold o use
 
 				mthr=mthres[indx] if indx in mthres.keys() else ''
-				hthr=mu * 0.995318 + sd * 0.427193 + 0.020434
 
-				if mthr!='':
+				if replicate in ['Rep1','Rep2','Rep3','Rep4']:
+					hthr=mu * 0.995318 + sd * 0.427193 + 0.020434
+				else:
+					hthr = mu * 0.995318 + sd * 0.427193 + 0.03
+
+				if mthr!='' and mthr!=0:
 					hthres = mthr
 				else:
 					hthres = hthr
@@ -666,41 +553,60 @@ for replicate in replicates:
 
 header = ['Replicate', 'Plate', 'Well', 'File', 'Worm'] + levels
 data.insert(0, header)
-ofname = '{}/Summary_{}_{}.csv'.format(odir, 'all', label)
+ofname = '{}/Summary_{}_{}.csv'.format(odir, 'rep56', label)
 writecsv(data, ofname, '\t')
 
 
 
 header = ['Replicate', 'Plate', 'Well', 'File', 'Worm'] + ['Mu','SD','Manual_t','Estimated_t']
 thresholds.insert(0, header)
-otname = '{}/Summary_{}_{}.csv'.format(odir, 'thresholds', label)
+otname = '{}/Summary_{}_{}.csv'.format(odir, 'thresholds_56', label)
 writecsv(thresholds, otname, '\t')
 
 
 
 
 # Generate training dataset
-plates = ['PM1', 'PM2A', 'PM3B', 'PM4A']
+# plates = ['PM1', 'PM2A', 'PM3B', 'PM4A']
+#
+# randset = np.random.randint(13, 97, (4, 4, 3))
+# generated = NestedDict()
+# for i, iv in enumerate(randset):
+# 	for j, jv in enumerate(iv):
+# 		if i == 3 and j == 2:
+# 			print 'Continue?'
+# 			continue
+# 		for k in jv:
+# 			generated[i + 1][plates[j - 1]][k] = 0
+#
+# random = readman('Thresholds_6-28_1652_random.csv')
 
-randset = np.random.randint(13, 97, (4, 4, 3))
-generated = NestedDict()
-for i, iv in enumerate(randset):
-	for j, jv in enumerate(iv):
-		if i == 3 and j == 2:
-			print 'Continue?'
-			continue
-		for k in jv:
-			generated[i + 1][plates[j - 1]][k] = 0
-
-random = readman('Thresholds_6-28_1652_random.csv')
-
-manual = readman('Manual_adjustment.csv')
-
+manual = readman('Thresholds_7-14_1539_manual_part3.csv')
 tmap = manual
-tmap = generated
-tmap = random
+# tmap = generated
+# tmap = random
 
-data = []
+sthres=1000
+cthres=0.02
+
+#
+# otname = '{}/Thresholds_{}-{}_{}{}_manual.csv'.format(odir, time.localtime().tm_mon, time.localtime().tm_mday,
+#                                                       time.localtime().tm_hour, time.localtime().tm_min)
+#
+# csvout=open(otname,'wb')
+# ofile = csv.writer(csvout, delimiter=',')
+
+
+
+
+# header = ['Replicate', 'Plate', 'Index', 'Threshold']
+# #data = []
+# #data.append(header)
+#
+# ofile.writerow(header)
+
+
+
 
 nfig = 2
 figure, axes = plt.subplots(ncols=nfig, figsize=(8 * nfig, 6), sharex=True,
@@ -712,9 +618,18 @@ for fin in [0, 1]:
 
 plt.tight_layout()
 for rep in tmap.keys():
-	a, b, cmin = settings[replicate]
+	#if rep in ['5','6']:
+	#	continue
+	#a, b, cmin = settings[replicate]
 	for pl in tmap[rep].keys():
+		mthres = tmap[rep][pl]
 		for indx in tmap[rep][pl].keys():
+			mthr = mthres[indx] if indx in mthres.keys() else ''
+			print 'Manual: {}'.format(mthr)
+			if mthr != '' and mthr != 0:
+				continue
+
+			print "{} {} {}".format(rep,pl,indx)
 			thrs = tmap[rep][pl][indx]
 			tfile = "{}/Rep{}/{}/{}_{}.tif".format(sourceloc, rep, pl, pl, str(indx).zfill(3))
 			replicate = 'Rep{}'.format(rep)
@@ -724,20 +639,40 @@ for rep in tmap.keys():
 				delworms = []
 			image = tiff.imread(tfile)
 			image_clean = wormdel(image, delworms)
-			imghsv = color.rgb2hsv(image)
+			imghsv = color.rgb2hsv(image_clean)
 			imgrgb = color.hsv2rgb(imghsv)
 			h = imghsv[:, :, 0]
-			s = imghsv[:, :, 1]
-			v = imghsv[:, :, 2]
-			hmin = thrs
+			#s = imghsv[:, :, 1]
+			#v = imghsv[:, :, 2]
+
+
+			v1D = np.around(h.ravel(), 3)
+			ftable = np.array(freqtable(v1D))
+			ftable = ftable[np.argsort(ftable[:, 0])]
+			X, Y, mu, sd = fitgauss(ftable[:, 0], ftable[:, 1])
+
+			if rep in ['1','2','3','4']:
+				hthr=mu * 0.995318 + sd * 0.427193 + 0.020434
+			else:
+				hthr = mu * 0.995318 + sd * 0.427193 + 0.03
+
+
+			hthres = hthr
+
 			nfig = 2
-			figure.suptitle("Rep{} {}-{}".format(rep, pl, indx))
+			figure.suptitle("Rep{} {}-{} {}".format(rep, pl, indx, indx2well(indx,1,12)))
 			ax = axes[0]
 			ax.imshow(imgrgb)
 			ax.set_title("Original")
 			while 1:
 				print 'Rendering: {} {} {}...'.format(rep, pl, indx)
-				labeled_worms, hmax, hthres = labeling2(imghsv, a, b, cmin, hmin=hmin)
+
+				#h = imghsv[:, :, 0]
+
+
+				labeled_worms = labeling3(imghsv, hthres,cthres,sthres)
+
+				#labeled_worms, hmax, hthres = labeling2(imghsv, a, b, cmin, hmin=hmin)
 				contours = measure.find_contours(labeled_worms, 0.2)
 				extract = imgrgb.copy()
 				extract[labeled_worms == 0, :] = [1, 1, 1]
@@ -748,24 +683,45 @@ for rep in tmap.keys():
 				ax.imshow(extract)
 				for n, contour in enumerate(contours):
 					ax.plot(contour[:, 1], contour[:, 0], linewidth=1)
-				ax.set_title("H Q95={0:.2f} Hmin={1:.2f}".format(hmax, hthres))
+				ax.set_title("H_peak={0:.3f} Hthres={1:.3f}".format(mu, hthres))
 				time.sleep(0.05)
 				plt.pause(0.0001)
-				print 'Q95={0:.3f}, Hthres={1:.3f}'.format(hmax, hthres)
+				print 'H_peak={0:.3f}, Hthres={1:.3f}'.format(mu, hthres)
 				newthr = raw_input("Good threshold/retry?: ")
 				if newthr == "":
 					tmap[rep][pl][indx] = hthres
-
+					#ofile.writerow([rep,pl,indx,hthres])
 					break
-				hmin = float(newthr)
+				elif newthr=="q":
+					raise StopIteration
+				hthres = float(newthr)
+
+
+
+
+#csvout.close()
+
+
+
+
+
+
+
 
 thresholds = map2table(tmap)
 header = ['Replicate', 'Plate', 'Index', 'Threshold']
-thresholds.insert(0, header)
 
-otname = '{}/Thresholds_{}-{}_{}{}_random.csv'.format(odir, time.localtime().tm_mon, time.localtime().tm_mday,
+
+
+otname = '{}/Thresholds_{}-{}_{}{}_manual_part4.csv'.format(odir, time.localtime().tm_mon, time.localtime().tm_mday,
                                                       time.localtime().tm_hour, time.localtime().tm_min)
+thresholds.insert(0, header)
 writecsv(thresholds, otname, ',')
+
+
+
+
+
 
 # Data export
 step = 0.005
@@ -774,7 +730,7 @@ data = []
 parameters = []
 prog = 0
 for rep in tmap.keys():
-	a, b, cmin = settings[replicate]
+	#a, b, cmin = settings[replicate]
 	for pl in tmap[rep].keys():
 		for indx in tmap[rep][pl].keys():
 			# rep=2
@@ -788,30 +744,31 @@ for rep in tmap.keys():
 				delworms = []
 			image = tiff.imread(tfile)
 			image_clean = wormdel(image, delworms)
-			imghsv = color.rgb2hsv(image)
+			imghsv = color.rgb2hsv(image_clean)
 			imgrgb = color.hsv2rgb(imghsv)
 			h = imghsv[:, :, 0]
-			s = imghsv[:, :, 1]
-			v = imghsv[:, :, 2]
+			#s = imghsv[:, :, 1]
+			#v = imghsv[:, :, 2]
 
-			for layer, mat in IT.izip(['h'], [h]):
-				rowhead = [rep, pl, indx, layer]
-				v1D = np.around(mat.ravel(), 3)
-				ftable = np.array(freqtable(v1D))
-				ftable = ftable[np.argsort(ftable[:, 0])]
+			#layer='h'
 
-				X, Y, mu, sd = fitgauss(ftable[:, 0], ftable[:, 1])
-				values = [mu, sd]
-				# fdict = {"{0:.2f}".format(freq[0]): int(freq[1]) for freq in ftable}
-				# values = [fdict[key] if key in fdict.keys() else 0 for key in levels]
-				data.append(rowhead + values)
+			rowhead = [rep, pl, indx,indx2well(indx,1,12), 'h', tmap[rep][pl][indx] ]
+			v1D = np.around(h.ravel(), 3)
+			ftable = np.array(freqtable(v1D))
+			ftable = ftable[np.argsort(ftable[:, 0])]
+
+			X, Y, mu, sd = fitgauss(ftable[:, 0], ftable[:, 1])
+			values = [mu, sd]
+			# fdict = {"{0:.2f}".format(freq[0]): int(freq[1]) for freq in ftable}
+			# values = [fdict[key] if key in fdict.keys() else 0 for key in levels]
+			data.append(rowhead + values)
 			prog += 1
 			print prog
 
-odname = '{}/Thresholds_data_{}-{}_{}{}_random_peaks.csv'.format(odir, time.localtime().tm_mon,
+odname = '{}/Thresholds_data_{}-{}_{}{}_manual_peaks.csv'.format(odir, time.localtime().tm_mon,
                                                                  time.localtime().tm_mday,
                                                                  time.localtime().tm_hour, time.localtime().tm_min)
-header = ['Replicate', 'Plate', 'Index', 'Layer'] + ['Mu', 'SD']  # levels
+header = ['Replicate', 'Plate', 'Index','Well', 'Layer','Threshold'] + ['Mu', 'SD']  # levels
 data.insert(0, header)
 writecsv(data, odname, '\t')
 
@@ -1495,3 +1452,133 @@ v_closing, h_closing, img2hsv, img2rgb = thresholding2(imghsv, thresi, sizei, []
 
 
 plt.imshow(img2hsv)
+
+
+# ==============================================================================
+# #@#Test parameters
+# ==============================================================================
+
+#
+# odir='2017-05-17_Trial_analysis2'
+#
+# sourceloc="2017-05-17_Trial"
+
+
+replicate = "Rep2"
+plate = "PM1"
+
+plate = 'Control_1930'
+
+thresholds, sizes = settings[replicate]
+a, b, cmin = settings[replicate]
+
+# hstep=0.01
+# hmin=0.3
+# hmax=0.4
+#
+# bstep=0.005
+# bmin=0.01
+# bmax=0.05
+
+
+
+hstep = 0.01
+hmin = 0.05
+hmax = 0.15
+
+bstep = 0.01
+bmin = 0.01
+bmax = 0.08
+
+hues = np.arange(hmin, hmax + hstep, hstep)
+brights = np.arange(bmin, bmax + bstep, bstep)
+
+totalf = len(brights) * len(hues)
+
+# files=["image_{}.tif".format(str(im).zfill(3)) for im in range(minimage,maximage+1)]
+
+# imid=33
+
+
+# files=["{}_{}.tif".format(plate,str(im).zfill(3)) for im in range(minimage,maximage+1)]
+
+# filenum=[1,2,9,15,18,28,33,35,61]
+filenum = [1, 2, 9, 28, 33]
+
+files = ["{}_{}.tif".format(plate, str(imid).zfill(3)) for imid in filenum]
+
+data = []
+
+sizei = sizes
+
+size_v_closing = [7]
+size_h_closing = [7]
+
+overall = len(files) * totalf * len(size_v_closing) * len(size_h_closing)
+print overall
+
+indo = 0.0
+for svc in size_v_closing:
+	sizei[0] = svc
+	for shc in size_h_closing:
+		sizei[1] = shc
+		sizestr = '|'.join([str(sz) for sz in sizei])
+		for file in files:
+			fpat, fname, ftype = filename(file)
+			print file
+			location = "{}/{}/{}/{}".format(sourceloc, replicate, plate, file)
+
+			well = indx2well(int(fname.split('_')[1]), start=1)
+			fig, axes = plt.subplots(nrows=len(brights), ncols=len(hues), sharex=True, sharey=True, figsize=(40, 24),
+			                         dpi=300)
+			fig.suptitle('{} - {} | {}'.format(fname, well, nutrients[plate][well]['Metabolite']))
+			# plt.subplots_adjust(left=0.1, bottom=0.1, right=0.95, top=0.5, wspace=0, hspace=0)
+			ind = 0.0
+
+			image = tiff.imread(location)
+			imghsv = color.rgb2hsv(image)
+			# imgrgb=color.hsv2rgb(imghsv)
+
+			v = imghsv[:, :, 2]
+
+			for bi, bval in enumerate(brights):
+				for hi, hval in enumerate(hues):
+
+					ind = ind + 1.0
+					indo = indo + 1.0
+					thresi = thresholds
+					thresi[0] = bval
+					thresi[2] = hval
+					thrstr = '|'.join([str(th) for th in thresi])
+
+					indx = int(fname.split('_')[1])
+					if indx in alldeletions[replicate][plate].keys():
+						print 'Deleting some worms!'
+						delworms = alldeletions[replicate][plate][indx]['Worms']
+					else:
+						delworms = []
+
+					# v_closing,h_closing,img2hsv,img2rgb=thresholding2(imghsv,thresi,sizei,delworms)
+					# labeled_worms=labeling(v,bval,hval)
+					labeled_worms = labeling2(imghsv, a, b, cmin)
+
+					plt.sca(axes[bi, hi]);
+					ax = axes[bi, hi]
+					# plt.imshow(img2hsv)
+					plt.imshow(labeled_worms)
+					plt.setp(ax.get_yticklabels(), visible=False)
+					plt.setp(ax.get_xticklabels(), visible=False)
+
+					if hi == 0:
+						ax.yaxis.set_label_position("left")
+						plt.ylabel(bval, rotation='vertical')
+					if bi == 0:
+						plt.title(hval)
+
+					prcf = ind * 100.0 / totalf
+					prco = indo * 100.0 / overall
+					print '{:}:{:6.1f}% |{:6.1f}%'.format(fname, prcf, prco)
+
+			# fig.tight_layout()
+			fig.savefig('{}/{}_{}_{}_labeling.pdf'.format(odir, replicate, fname, sizestr), bbox_inches='tight')
+			plt.close(fig)
