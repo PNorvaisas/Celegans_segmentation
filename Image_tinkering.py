@@ -6,17 +6,14 @@ import csv
 import pandas
 import matplotlib
 
-matplotlib.use('MacOSX')
-#matplotlib.use('Agg')
+#matplotlib.use('MacOSX') # For visualising
+matplotlib.use('Agg') # For saving
 #matplotlib.use('MacOSX') #TkAgg
 
 import matplotlib.pyplot as plt
 
 
-#fig, axes = plt.subplots(nrows=8, ncols=12, figsize=(72, 47), dpi=300)
-
-#%matplotlib osx
-#plt.interactive(False)
+plt.interactive(False)
 
 
 import numpy as np
@@ -277,8 +274,6 @@ def labeling3(imghsv, hthres,cthres,size):
 	return labeled_worms
 
 
-
-
 def map2table(data):
 	table = []
 	for a in data.keys():
@@ -293,7 +288,6 @@ def gauss(x, p):  # p[0]==mean, p[1]==stdev
 	return 1.0 / (p[1] * np.sqrt(2 * np.pi)) * np.exp(-(x - p[0]) ** 2 / (2 * p[1] ** 2))
 
 def fitgauss(xr, yr):
-
 	if xr[0]==0.0:
 		xr=xr[1:]
 		yr=yr[1:]
@@ -328,6 +322,13 @@ alldeletions = readdel('{}/Deletions.csv'.format(odir))
 
 
 thresholds_man = readman('Thresholds_all_3.csv')
+
+
+
+
+
+
+
 
 # settings={'Rep1': [[0.02,1,0.345,0.4], [7,7]],
 #          'Rep2': [[0.02,1,0.25,0.5], [7,7]],
@@ -774,13 +775,53 @@ writecsv(data, odname, '\t')
 
 
 
+#Carnitine
+
+matplotlib.rcParams.update({'font.size': 80})
+
+fig, axes = plt.subplots(nrows=4, ncols=5, figsize=(300,160), dpi=300)
+fig.suptitle("Carnitine summary")
+#plt.subplots_adjust(left=0.1, bottom=0.1, right=0.95, top=0.9, wspace=0.2, hspace=0.2)
+
+
+for ri,rep in enumerate([1,2,3,5,6]):
+	for ii,indx in enumerate([1,89,24,50]):
+		#rep = 1
+		pl = 'PM2A'
+		#indx = 89
+		tfile = "{}/Rep{}/{}/{}_{}.tif".format(sourceloc, rep, pl, pl, str(indx).zfill(3))
+		replicate = 'Rep{}'.format(rep)
+		well = indx2well(indx,1)
+
+		if indx in alldeletions[replicate][plate].keys():
+			delworms = alldeletions[replicate][plate][indx]['Worms']
+		else:
+			delworms = []
+		image = tiff.imread(tfile)
+		image_clean = wormdel(image, delworms)
+		imghsv = color.rgb2hsv(image_clean)
+		imgrgb = color.hsv2rgb(imghsv)
+
+		plt.sca(axes[ii, ri]);
+		ax = axes[ii, ri]
+
+		plt.imshow(imgrgb);
+		plt.setp(ax.get_yticklabels(), visible=False)
+		plt.setp(ax.get_xticklabels(), visible=False)
+		ttl= 'Rep{} {}-{} | {}'.format(rep,indx, well, nutrients[pl][well]['Metabolite'])
+		plt.title(ttl)
+
+
+#fig.tight_layout()
+fig.savefig('{}/Summary/Summary_carnitine.pdf'.format(odir), bbox_inches='tight')
+
 
 
 # Distribution
 
 rep = 1
-pl = 'PM1'
-indx = 10
+pl = 'PM2A'
+indx = 89
 tfile = "{}/Rep{}/{}/{}_{}.tif".format(sourceloc, rep, pl, pl, str(indx).zfill(3))
 replicate = 'Rep{}'.format(rep)
 if indx in alldeletions[replicate][plate].keys():
@@ -794,6 +835,10 @@ imgrgb = color.hsv2rgb(imghsv)
 h = imghsv[:, :, 0]
 s = imghsv[:, :, 1]
 v = imghsv[:, :, 2]
+
+plt.imshow(imgrgb)
+
+
 
 
 
