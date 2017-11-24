@@ -44,8 +44,6 @@ from skimage.measure import label, regionprops
 #from skimage.filters import threshold_otsu, threshold_adaptive
 
 #from skimage.feature import peak_local_max
-
-
 #from scipy import misc
 
 
@@ -389,6 +387,9 @@ cthres=0.02
 
 label = 'auto_threshold'
 
+
+#Run through all data using adjustments
+
 for replicate in replicates:
 
 	platesel = plates[:]
@@ -453,10 +454,14 @@ for replicate in replicates:
 				else:
 					hthr = mu * 0.995318 + sd * 0.427193 + 0.03
 
+
+				#Use manual value or estimate
 				if mthr!='' and mthr!=0:
 					hthres = mthr
 				else:
 					hthres = hthr
+
+
 
 				labeled_worms = labeling3(imghsv, hthres,cthres,sthres)
 
@@ -559,6 +564,9 @@ writecsv(data, ofname, '\t')
 
 
 
+
+
+
 header = ['Replicate', 'Plate', 'Well', 'File', 'Worm'] + ['Mu','SD','Manual_t','Estimated_t']
 thresholds.insert(0, header)
 otname = '{}/Summary_{}_{}.csv'.format(odir, 'thresholds_56', label)
@@ -606,7 +614,7 @@ cthres=0.02
 #
 # ofile.writerow(header)
 
-
+#Collect adjustments
 
 
 nfig = 2
@@ -618,6 +626,7 @@ for fin in [0, 1]:
 	ax.set_adjustable('box-forced')
 
 plt.tight_layout()
+
 for rep in tmap.keys():
 	#if rep in ['5','6']:
 	#	continue
@@ -625,14 +634,22 @@ for rep in tmap.keys():
 	for pl in tmap[rep].keys():
 		mthres = tmap[rep][pl]
 		for indx in tmap[rep][pl].keys():
+
 			mthr = mthres[indx] if indx in mthres.keys() else ''
 			print 'Manual: {}'.format(mthr)
 			if mthr != '' and mthr != 0:
 				continue
 
 			print "{} {} {}".format(rep,pl,indx)
+
+
 			thrs = tmap[rep][pl][indx]
+
+
 			tfile = "{}/Rep{}/{}/{}_{}.tif".format(sourceloc, rep, pl, pl, str(indx).zfill(3))
+
+
+
 			replicate = 'Rep{}'.format(rep)
 			if indx in alldeletions[replicate][plate].keys():
 				delworms = alldeletions[replicate][plate][indx]['Worms']
@@ -772,6 +789,8 @@ odname = '{}/Thresholds_data_{}-{}_{}{}_manual_peaks.csv'.format(odir, time.loca
 header = ['Replicate', 'Plate', 'Index','Well', 'Layer','Threshold'] + ['Mu', 'SD']  # levels
 data.insert(0, header)
 writecsv(data, odname, '\t')
+
+
 
 
 
