@@ -319,13 +319,175 @@ nutrients = readmet('/Users/Povilas/Dropbox/Projects/2015-Metformin/Biolog/Biolo
 alldeletions = readdel('{}/Deletions.csv'.format(odir))
 
 
+
+
+
 thresholds_man = readman('Thresholds_all_3.csv')
 
+cthresholds_man = readman('Thresholds_Control_manual.csv')
 
 
 
 
 
+# ==============================================================================
+# #Example picks
+# ==============================================================================
+# rows=['A','B','C','D','E','F','G','H']
+
+ttllen = 24
+ttlsize = 24
+
+minimage = 1
+maximage = 96
+
+maxpix = 0
+
+
+np.set_printoptions(precision=3)
+
+step = 0.001
+levels = ["{0:.3f}".format(lvl) for lvl in np.arange(0, 1 + step, step)]
+
+
+indo = 0.0
+
+sthres=1000
+cthres=0.02
+
+
+#Run through all data using adjustments
+
+
+files=['Rep6/PM1/PM1_001.tif','Rep5/NGM_Control/NGM_NoMetf_003.tif','Rep5/NGM_Control/NGM_NoMetf_007.tif','Rep5/NGM_Control/NGM_NoMetf_002.tif','Rep6/PM1/PM1_002.tif','Rep6/PM1/PM1_079.tif','Rep4/PM4A/PM4A_054.tif']
+
+#files=['Rep6/PM1/PM1_001.tif']
+
+
+
+for fl in files:
+
+	replicate,plate,fln=fl.split('/')
+	fpat, fname, ftype = filename(fln)
+	# print plate, fln, row, col
+	location = "{}/{}".format(sourceloc,fl)
+
+	if plate in ['PM1','PM2A','PM3B','PM4A']:
+		mthres = thresholds_man[replicate[3]][plate]
+		indx = int(fln.split('_')[1].replace('.tif', ''))
+		well = indx2well(indx, start=1)
+		metname = nutrients[plate][well]['Metabolite']
+		mthr = mthres[indx] if indx in mthres.keys() else ''
+		ofignm = '{}/Examples/{}_{}_{}_{}.pdf'.format(odir, replicate, fname, well, metname)
+
+	else:
+		mthres = cthresholds_man[replicate[3]][plate]
+		indx = int(fln.split('_')[2].replace('.tif', ''))
+		well = indx2well(indx, start=1)
+		metname=fname
+		mthr = mthres[fln] if fln in mthres.keys() else ''
+		ofignm = '{}/Examples/{}_{}_{}.pdf'.format(odir, replicate, fname, well)
+
+
+
+	print replicate, plate, fln, well
+
+
+	#indx = flin + 1
+
+
+
+
+	ttl = '{} {}-{} | {}'.format(replicate,indx, well, metname)
+	ttlw = '\n'.join(tw.wrap(ttl, ttllen))
+
+	if indx in alldeletions[replicate][plate].keys():
+		print 'Deleting some worms!'
+		delworms = alldeletions[replicate][plate][indx]['Worms']
+	else:
+		delworms = []
+
+	image = tiff.imread(location)
+	imgclean = wormdel(image, delworms)
+
+	imghsv = color.rgb2hsv(imgclean)
+	imgrgb = color.hsv2rgb(imghsv)
+	rhead = [replicate, plate, well, fln]
+
+
+	h = imghsv[:, :, 0]
+	v1D = np.around(h.ravel(), 3)
+	ftable = np.array(freqtable(v1D))
+	ftable = ftable[np.argsort(ftable[:, 0])]
+	X, Y, mu, sd = fitgauss(ftable[:, 0], ftable[:, 1])
+	# What hue threshold o use
+
+
+
+	if replicate in ['Rep1','Rep2','Rep3','Rep4']:
+		hthr=mu * 0.995318 + sd * 0.427193 + 0.020434
+	else:
+		hthr = mu * 0.995318 + sd * 0.427193 + 0.03
+
+
+	#Use manual value or estimate
+	if mthr!='' and mthr!=0:
+		hthres = mthr
+	else:
+		hthres = hthr
+
+
+
+	labeled_worms = labeling3(imghsv, hthres,cthres,sthres)
+
+
+	wormind = list(np.unique(labeled_worms))
+	worms = {w: labeled_worms[labeled_worms == w].shape[0] for w in wormind}
+	worms = {wk: wp for wk, wp in worms.items() if wp < 1000000}
+
+
+	#Make white background
+	extract = imgrgb.copy()
+	extract[labeled_worms == 0, :] = [1, 1, 1]
+
+
+	contours = measure.find_contours(labeled_worms, 0.8)
+
+	fig, ax = plt.subplots(num=None, figsize=(20,15), dpi=300, facecolor='w', edgecolor=None,sharex=False,sharey=False)
+	#plt.figure(num=None, figsize=(8, 6), dpi=80, facecolor='w', edgecolor=None)
+	plt.subplots_adjust(bottom=0, left=0 ,hspace=0, wspace=0)
+
+	fig.patch.set_visible(False)
+	ax.axis('off')
+
+	plt.imshow(imgrgb)
+
+	for n, contour in enumerate(contours):
+		plt.plot(contour[:, 1], contour[:, 0], linewidth=1)
+
+	# for region in regionprops(labeled_worms):
+	# 	minr, minc, maxr, maxc = region.bbox
+	# 	plt.text(maxc, maxr, region.label)
+
+	plt.title(ttlw, fontsize=ttlsize)
+
+	plt.tight_layout()
+
+	fig.savefig(ofignm, pad_inches = 0)#bbox_inches='tight'
+	plt.close(fig)  # header=['Replicate','Plate','Well','File','Worm','Brightness_value','Frequency']
+
+
+
+
+
+
+
+
+
+
+
+
+#thresholds_man.update(cthresholds_man)
 
 
 # settings={'Rep1': [[0.02,1,0.345,0.4], [7,7]],
@@ -571,6 +733,19 @@ header = ['Replicate', 'Plate', 'Well', 'File', 'Worm'] + ['Mu','SD','Manual_t',
 thresholds.insert(0, header)
 otname = '{}/Summary_{}_{}.csv'.format(odir, 'thresholds_56', label)
 writecsv(thresholds, otname, '\t')
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
