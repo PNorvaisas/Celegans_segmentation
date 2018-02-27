@@ -271,6 +271,15 @@ def labeling3(imghsv, hthres,cthres,size):
 
 	return labeled_worms
 
+def jetimage(image,typeadjust=True):
+    image_rescale=exposure.rescale_intensity(image)
+    cmap =plt.get_cmap('jet')
+    image_rgb = cmap(image_rescale)
+    
+    if typeadjust:
+        image_rgb = skimage.img_as_ubyte(np.delete(image_rgb, 3, 2))
+    
+    return image_rgb
 
 def map2table(data):
 	table = []
