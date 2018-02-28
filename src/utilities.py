@@ -5,15 +5,10 @@ import textwrap as tw
 import csv
 import pandas as pd
 import matplotlib
-
-#matplotlib.use('MacOSX') # For visualising
-#matplotlib.use('Agg') # For saving
-#matplotlib.use('MacOSX') #TkAgg
-
 import matplotlib.pyplot as plt
 
 
-plt.interactive(False)
+#plt.interactive(False)
 
 
 import numpy as np
@@ -47,10 +42,6 @@ from skimage.filters.rank import median, mean
 from skimage import measure
 from skimage.measure import label, regionprops
 
-#from skimage.filters import threshold_otsu, threshold_adaptive
-
-#from skimage.feature import peak_local_max
-#from scipy import misc
 
 
 import scipy.optimize as opt
