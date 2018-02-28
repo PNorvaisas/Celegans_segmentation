@@ -3,7 +3,7 @@ import sys
 import tifffile as tiff
 import textwrap as tw
 import csv
-import pandas
+import pandas as pd
 import matplotlib
 
 #matplotlib.use('MacOSX') # For visualising
@@ -30,10 +30,16 @@ from skimage import filters
 from skimage.util.dtype import dtype_range
 from skimage.util import img_as_ubyte
 from skimage.feature import canny
+from skimage.feature import peak_local_max
 from skimage.filters import sobel
+
 from skimage.morphology import disk, opening, dilation, square, watershed
+
 from skimage.morphology import erosion, white_tophat, black_tophat, closing
+
 from skimage import exposure
+
+
 
 
 from skimage.filters import rank
@@ -121,6 +127,34 @@ def indx2well(ind, start=0, rowln=12):
 	well = '{}{}'.format(rows[row], col)
 	return well
 
+def readTF(ifile):
+    print ifile
+    TFs = NestedDict()
+    allfiles=pd.read_csv(ifile)
+    headers = allfiles.columns
+    print headers
+    nec = ['Replicate', 'Gene', 'Folder','File','FileNo','FileInd','Max']
+    if all(n in headers for n in nec):
+        print 'Necessary headers found!'
+    else:
+        print 'Missing essential headers in metabolites file!'
+        print headers
+        sys.exit(0)
+    for index, row in allfiles.iterrows():
+        rep=row['Replicate']
+        gene=row['Gene']
+        tp=row['Type']
+        fld=row['Folder']
+        flno=row['FileNo']
+        flin=row['FileInd']
+        fl=row['File']
+        gmax=row['Max']
+        TFs[gene][rep][tp][fld]['ByFNO'][flno] = fl
+        TFs[gene][rep][tp][fld]['ByFIN'][flin] = fl
+        if not 'Max' in TFs[gene].keys():
+            TFs[gene]['Max']=gmax
+        
+    return TFs
 
 def readmet(ifile):
 	print ifile
@@ -220,7 +254,7 @@ def readman(ifile):
 
 
 def freqtable(vector):
-	my_series = pandas.Series(vector)
+	my_series = pd.Series(vector)
 	counts = my_series.value_counts()
 	ftable = [[key, value] for key, value in dict(counts).iteritems()]
 	return ftable
@@ -270,6 +304,106 @@ def labeling3(imghsv, hthres,cthres,size):
 			labeled_worms[labeled_worms == w] = 0
 
 	return labeled_worms
+
+
+def labeller4(v,vmin=0.04,vmax=0.06,step=0.001,smin=40000,smax=60000,pmin=3,pmax=5,blobsize=1000):
+    #v = imghsv[:, :, 2]
+
+    # Filtering noise
+    dv = rank.median(v, disk(3)) / 255.0
+    #Expanding 
+    comb = opening(dv, selem=disk(5))
+
+
+    umarks=[0]
+    wsize=0
+    imgprc=100
+
+    iter=0
+    total=np.sum(comb >0)
+
+    hthri=vmin
+    step=step
+
+    while (wsize < smin or wsize > smax or imgprc<3 or imgprc>5) and iter<100 and hthri<vmax:
+        markers = np.zeros_like(comb)
+        # Mark background
+        imgprc=np.float(np.sum(comb > hthri)*100)/total
+
+        markers[comb > hthri] = 2
+        umarks=np.unique(markers)
+        wsize=np.count_nonzero(markers[markers==2])
+        #print("Threshold: {:.4f}, Worm size: {:d} Image covered: {:.2f}%".format(hthri,wsize,imgprc))
+        hthri+=step
+        iter+=1
+
+    markers[comb == 0] = 1
+
+    print("Threshold: {:.4f}, Worm size: {:d} Image covered: {:.2f}%".format(hthri,wsize,imgprc))
+    distance = ndi.distance_transform_edt(markers)
+    local_maxi = peak_local_max(distance, indices=False, footprint=np.ones((3, 3)),
+                                labels=markers)
+    markersmaxi = ndi.label(local_maxi)[0]
+    segmentation = watershed(distance, markersmaxi, mask=markers)
+    segmentation_fill = ndi.binary_fill_holes(segmentation)
+    labeled_worms, _ = ndi.label(segmentation_fill)
+
+    for w in list(np.unique(labeled_worms)):
+        # print labeled_worms[labeled_worms==w].shape[0]
+        if labeled_worms[labeled_worms == w].shape[0] < blobsize:
+            labeled_worms[labeled_worms == w] = 0
+
+    #Smoother worms
+    labeled_worms = opening(labeled_worms, selem=disk(10))
+
+    wormind = list(np.unique(labeled_worms))
+    worms = {w: labeled_worms[labeled_worms == w].shape[0] for w in wormind}
+    worms = {wk: wp for wk, wp in worms.items() if wp < 1000000}
+    
+    contours = measure.find_contours(labeled_worms, 0.8)
+    
+    return [comb,labeled_worms,contours,worms]
+
+
+def plotcontours(image,ax,labeled_worms=False,title="",plotcontour=True,plotlabels=True,white=True,ylabel="",xlabel=""):
+
+    plt.sca(ax)
+    if white:
+        extract = image.copy()
+        extract[labeled_worms == 0, :] = [1, 1, 1]
+    else:
+        extract = image
+
+    ax.set_label(None)
+    ax.set_axes(None)
+
+    ax.set_xlim(0, 1344)
+    ax.set_ylim(1024,0)
+
+    plt.setp(ax.get_yticklabels(), visible=False)
+    plt.setp(ax.get_xticklabels(), visible=False)
+    plt.setp(ax.get_yticklines(), visible=False)
+    plt.setp(ax.get_xticklines(), visible=False)
+    
+    ax.set_title(title)
+    
+    if ylabel!="":
+        plt.ylabel(ylabel)
+    if xlabel!="":
+        plt.xlabel(xlabel)
+    
+    
+
+    plt.imshow(extract)
+
+    if plotcontour:
+        contours = measure.find_contours(labeled_worms, 0.8)
+        for n, contour in enumerate(contours):
+            plt.plot(contour[:, 1], contour[:, 0], linewidth=1)
+    if plotlabels:
+        for region in regionprops(labeled_worms):
+            minr, minc, maxr, maxc = region.bbox
+            plt.text(maxc, maxr, region.label)
 
 def jetimage(image,typeadjust=True):
     image_rescale=exposure.rescale_intensity(image)
