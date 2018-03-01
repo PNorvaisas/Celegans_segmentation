@@ -21,11 +21,14 @@ from skimage import io as skio
 from skimage import color
 from skimage import data
 from skimage import img_as_float
-from skimage import filters
+
 from skimage.util.dtype import dtype_range
 from skimage.util import img_as_ubyte
+
 from skimage.feature import canny
 from skimage.feature import peak_local_max
+
+from skimage import filters
 from skimage.filters import sobel
 
 from skimage.morphology import disk, opening, dilation, square, watershed
