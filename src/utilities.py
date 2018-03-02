@@ -300,13 +300,14 @@ def labeling3(imghsv, hthres,cthres,size):
 	return labeled_worms
 
 
-def labeller4(v,vmin=0.04,vmax=0.06,step=0.001,smin=40000,smax=60000,pmin=3,pmax=5,blobsize=1000):
+def labeller4(v,vmin=0.04,vmax=0.06,step=0.001,smin=40000,smax=60000,pmin=3,pmax=5,blobsize=1000,fd=3,od=5):
     #v = imghsv[:, :, 2]
 
     # Filtering noise
-    dv = rank.median(v, disk(3)) / 255.0
+    dv = rank.median(v, disk(fd)) / 255.0
     #Expanding 
-    comb = opening(dv, selem=disk(5))
+    comb = opening(dv, selem=disk(od))
+    imagef=skimage.img_as_ubyte(comb)
 
 
     umarks=[0]
@@ -318,8 +319,8 @@ def labeller4(v,vmin=0.04,vmax=0.06,step=0.001,smin=40000,smax=60000,pmin=3,pmax
 
     hthri=vmin
     step=step
-
-    while (wsize < smin or wsize > smax or imgprc<3 or imgprc>5) and iter<100 and hthri<vmax:
+    #wsize < smin or wsize > smax or 
+    while (imgprc<pmin or imgprc>pmax) and iter<100 and hthri<vmax:
         markers = np.zeros_like(comb)
         # Mark background
         imgprc=np.float(np.sum(comb > hthri)*100)/total
@@ -348,7 +349,7 @@ def labeller4(v,vmin=0.04,vmax=0.06,step=0.001,smin=40000,smax=60000,pmin=3,pmax
             labeled_worms[labeled_worms == w] = 0
 
     #Smoother worms
-    labeled_worms = opening(labeled_worms, selem=disk(10))
+    labeled_worms = opening(labeled_worms, selem=disk(10)).astype('uint8')
 
     wormind = list(np.unique(labeled_worms))
     worms = {w: labeled_worms[labeled_worms == w].shape[0] for w in wormind}
@@ -368,11 +369,13 @@ def plotcontours(image,ax,labeled_worms=False,title="",plotcontour=True,plotlabe
     else:
         extract = image
 
-    ax.set_label(None)
-    ax.set_axes(None)
+
 
     ax.set_xlim(0, 1344)
     ax.set_ylim(1024,0)
+    
+    ax.set_label(None)
+    ax.set_axes(None)
 
     plt.setp(ax.get_yticklabels(), visible=False)
     plt.setp(ax.get_xticklabels(), visible=False)
