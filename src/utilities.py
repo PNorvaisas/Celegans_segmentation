@@ -362,11 +362,13 @@ def labeller4(v,vmin=0.04,vmax=0.06,step=0.001,smin=40000,smax=60000,pmin=3,pmax
     
     return [comb,labeled_worms,contours,worms]
 
+def multiprocessor(cores,func,args,nargs=0):
 
-def multiprocessor(cores,func,args,total=0):
-
-    if total==0:
-        total=len(args)
+    #if total==0:
+    if nargs==0:
+        alen=len(args)
+    else:
+        alen=nins
     
     m = Manager()
     q = m.Queue()
@@ -381,7 +383,7 @@ def multiprocessor(cores,func,args,total=0):
         else:
             lcomp=q.qsize()
             #print lcomp
-            prc = float(lcomp)*100/float(total)
+            prc = float(lcomp)*100/float(alen)
             if prc>prcprev:
                 timepassed=float(time.time()-start)
                 if prc!=0:
@@ -390,7 +392,7 @@ def multiprocessor(cores,func,args,total=0):
                 else:
                     total=int('inf')
                     remaining=int('inf')
-                print "Done {0:3d}%, {1:>5}/{2:<5} remaining: {3:<5} total: {4:<5}".format(int(prc),str(lcomp),str(total),str(datetime.timedelta(seconds=remaining)),str(datetime.timedelta(seconds=total)))
+                print "Done {0:3d}%, {1:>5}/{2:<5} remaining: {3:<5} total: {4:<5}".format(int(prc),str(lcomp),str(alen),str(datetime.timedelta(seconds=remaining)),str(datetime.timedelta(seconds=total)))
                 prcprev=prc
         time.sleep(5)
     print 'Collecting results....'
@@ -415,11 +417,13 @@ def collector_M((fln,settings,q),saveRGB=False,colordepth='uint8'):
             imagesave=image[:,:,0]
         else:
             imagesave=color.rgb2hsv(image)[:,:,2]
-    else:
+    elif np.ndim(image)==2:
         if saveRGB:
             imagesave=color.gray2rgb(image)
         else:
-            imagesave=image     
+            imagesave=image
+    else:
+        raise ValueError('Tiff image has more than 3 layers!')
            
     if imagesave.dtype!=colordepth:
         if colordepth=='uint8':
@@ -436,6 +440,9 @@ def collector_M((fln,settings,q),saveRGB=False,colordepth='uint8'):
     q.put(fln)
     
     return [fln,imagesave]
+
+
+
 
 
 def labeller4_M((fln, image_raw, settings,q), vmin=0.04, vmax=0.06, step=0.001, smin=40000, smax=60000, pmin=3, pmax=5, blobsize=1000, maxsize=1000000, fd=3 ,od=5, sd=10):
@@ -469,7 +476,9 @@ def labeller4_M((fln, image_raw, settings,q), vmin=0.04, vmax=0.06, step=0.001, 
     imgprc=100
 
     iter=0
-    total=comb.shape[0]*comb.shape[1]
+    isize=comb.shape[0]*comb.shape[1]
+    
+    
     vthri=vmin
     step=step
     #wsize < smin or wsize > smax or 
@@ -477,7 +486,8 @@ def labeller4_M((fln, image_raw, settings,q), vmin=0.04, vmax=0.06, step=0.001, 
         vthrio=vthri
         vthri+=step
         # Mark background
-        imgprc=np.float(np.sum(comb > vthri)*100)/total
+        imgprc=np.float(np.sum(comb > vthri)*100)/float(isize)
+        
         wsize=np.count_nonzero(comb[comb>vthri])
         #print("Threshold: {:.4f}, Worm size: {:d} Image covered: {:.2f}%".format(vthri,wsize,imgprc))
         iter+=1
@@ -512,7 +522,6 @@ def labeller5_M((fln,image_raw,settings,q), wgoal=60000, vmin=0.04, vmax=0.06, s
         image=image_raw
         v=skimage.img_as_ubyte(color.rgb2hsv(image_raw))[:,:,2]
     
-
     # Filtering noise
     #Will change type!
     dv = rank.median(v, disk(fd))
@@ -523,10 +532,10 @@ def labeller5_M((fln,image_raw,settings,q), wgoal=60000, vmin=0.04, vmax=0.06, s
     
     imagef=skimage.img_as_ubyte(comb)
     
-    total=comb.shape[0]*comb.shape[1]
-    wsize=total
-    wsizeo=total
-    
+    isize=comb.shape[0]*comb.shape[1]
+
+    wsize=isize
+    wsizeo=isize
     vthri=vmin
     step=0.001
     wdiff=abs(wgoal-wsize)
@@ -543,7 +552,7 @@ def labeller5_M((fln,image_raw,settings,q), wgoal=60000, vmin=0.04, vmax=0.06, s
 
         wdiff=abs(wsize-wgoal)
 
-        imgprc=np.float(np.sum(comb > vthri)*100)/total
+        imgprc=np.float(np.sum(comb > vthri)*100)/isize
         #print("Threshold: {:.4f}, Worm size: {:d}, Wdiff: {:d} Image covered: {:.2f}%".format(vthri,wsize,wdiff,imgprc))
         iter += 1
 
@@ -553,8 +562,6 @@ def labeller5_M((fln,image_raw,settings,q), wgoal=60000, vmin=0.04, vmax=0.06, s
     markers[comb > vthrio] = 2
     markers[comb ==0] = 1
 
-
-    
     labeled_worms,worms=waterseg(markers,sd,blobsize,maxsize)
     
     results_data=getresults(image,labeled_worms)
