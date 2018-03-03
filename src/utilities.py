@@ -31,12 +31,14 @@ from skimage.feature import peak_local_max
 from skimage import filters
 from skimage.filters import sobel
 
-from skimage.morphology import disk, opening, dilation, square, watershed
+from skimage.morphology import disk, opening, dilation, square, watershed, skeletonize
 
 from skimage.morphology import erosion, white_tophat, black_tophat, closing
 
 from skimage import exposure
 
+import datetime
+from multiprocessing import Pool, Manager
 
 
 
@@ -307,6 +309,7 @@ def labeller4(v,vmin=0.04,vmax=0.06,step=0.001,smin=40000,smax=60000,pmin=3,pmax
     dv = rank.median(v, disk(fd)) / 255.0
     #Expanding 
     comb = opening(dv, selem=disk(od))
+    
     imagef=skimage.img_as_ubyte(comb)
 
 
@@ -327,7 +330,7 @@ def labeller4(v,vmin=0.04,vmax=0.06,step=0.001,smin=40000,smax=60000,pmin=3,pmax
 
         markers[comb > hthri] = 2
         umarks=np.unique(markers)
-        wsize=np.count_nonzero(markers[markers==2])
+        wsize=np.count_nonzero(markers[markers>1])
         #print("Threshold: {:.4f}, Worm size: {:d} Image covered: {:.2f}%".format(hthri,wsize,imgprc))
         hthri+=step
         iter+=1
@@ -360,12 +363,274 @@ def labeller4(v,vmin=0.04,vmax=0.06,step=0.001,smin=40000,smax=60000,pmin=3,pmax
     return [comb,labeled_worms,contours,worms]
 
 
+def multiprocessor(cores,func,args,total=0):
+
+    if total==0:
+        total=len(args)
+    
+    m = Manager()
+    q = m.Queue()
+    p=Pool(cores)
+    argsq=[ arg + (q,) for arg in args]
+    result = p.map_async(func, argsq)
+    start=time.time()
+    prcprev=0
+    while True:
+        if result.ready():
+            break
+        else:
+            lcomp=q.qsize()
+            #print lcomp
+            prc = float(lcomp)*100/float(total)
+            if prc>prcprev:
+                timepassed=float(time.time()-start)
+                if prc!=0:
+                    total=int((timepassed*100/prc))
+                    remaining=int((timepassed*100/prc)-timepassed)
+                else:
+                    total=int('inf')
+                    remaining=int('inf')
+                print "Done {0:3d}%, {1:>5}/{2:<5} remaining: {3:<5} total: {4:<5}".format(int(prc),str(lcomp),str(total),str(datetime.timedelta(seconds=remaining)),str(datetime.timedelta(seconds=total)))
+                prcprev=prc
+        time.sleep(5)
+    print 'Collecting results....'
+    results=result.get()
+    print 'Done!'
+    #print results
+    return results
+
+
+def collector_M((fln,settings,q),saveRGB=False,colordepth='uint8'):
+    
+    for key,val in settings.items():
+        exec(key + '=val')
+    
+    image = tiff.imread(fln)
+    #Save only one layer, as they are redundant
+   
+    if np.ndim(image)==3:
+        if saveRGB:
+            imagesave=image
+        elif np.sum(image[:,:,0]-image[:,:,1])==0 and np.sum(image[:,:,1]-image[:,:,2])==0:
+            imagesave=image[:,:,0]
+        else:
+            imagesave=color.rgb2hsv(image)[:,:,2]
+    else:
+        if saveRGB:
+            imagesave=color.gray2rgb(image)
+        else:
+            imagesave=image     
+           
+    if imagesave.dtype!=colordepth:
+        if colordepth=='uint8':
+            imagesave=skimage.img_as_ubyte(imagesave)
+        elif colordepth=='uint16':
+            imagesave=skimage.img_as_uint(imagesave)
+        elif colordepth=='int':
+            imagesave=skimage.img_as_int(imagesave)
+        elif colordepth=='float':   
+            imagesave=skimage.img_as_float(imagesave)
+        else:
+            print "Unknown color depth: {}".format(colordepth)
+            
+    q.put(fln)
+    
+    return [fln,imagesave]
+
+
+def labeller4_M((fln, image_raw, settings,q), vmin=0.04, vmax=0.06, step=0.001, smin=40000, smax=60000, pmin=3, pmax=5, blobsize=1000, maxsize=1000000, fd=3 ,od=5, sd=10):
+    
+    for key,val in settings.items():
+        exec(key + '=val')
+    
+    if np.ndim(image_raw)==2:
+        #Stays uint8
+        image=color.gray2rgb(image_raw)
+        v=image_raw
+    else:
+        image=image_raw
+        if np.sum(image[:,:,0]-image[:,:,1])==0 and np.sum(image[:,:,1]-image[:,:,2])==0:
+            v=image_raw
+        else:
+            #Will cause change of type
+            v=skimage.img_as_ubyte(color.rgb2hsv(image_raw))[:,:,2]
+    
+    # Filtering noise
+    #Gets back to 255 scale!
+    dv = rank.median(v, disk(fd))
+    #Expanding 
+    comb = opening(dv, selem=disk(od))
+    
+    comb=skimage.img_as_float(comb)
+    
+    imagef=skimage.img_as_ubyte(comb)
+
+    wsize=0
+    imgprc=100
+
+    iter=0
+    total=comb.shape[0]*comb.shape[1]
+    vthri=vmin
+    step=step
+    #wsize < smin or wsize > smax or 
+    while (imgprc<pmin or imgprc>pmax) and iter<100 and vthri<vmax:
+        vthrio=vthri
+        vthri+=step
+        # Mark background
+        imgprc=np.float(np.sum(comb > vthri)*100)/total
+        wsize=np.count_nonzero(comb[comb>vthri])
+        #print("Threshold: {:.4f}, Worm size: {:d} Image covered: {:.2f}%".format(vthri,wsize,imgprc))
+        iter+=1
+        
+    markers = np.zeros_like(comb)
+    markers[comb > vthrio] = 2
+    markers[comb == 0] = 1
+
+    labeled_worms,worms=waterseg(markers,sd,blobsize,maxsize)
+    
+    #Data collection step
+    #In Velocity background is summed in only one channel!
+    results_data=getresults(image,labeled_worms)
+    
+    q.put(fln)
+    
+    return [fln,imagef,labeled_worms,results_data]
+
+
+
+
+
+def labeller5_M((fln,image_raw,settings,q), wgoal=60000, vmin=0.04, vmax=0.06, step=0.001, smin=40000, smax=60000, pmin=3, pmax=5, blobsize=1000, maxsize=1000000, fd=20, od=5,sd=10):
+    
+    for key,val in settings.items():
+        exec(key + '=val')
+    
+    if np.ndim(image_raw)==2:
+        image=color.gray2rgb(image_raw)
+        v=image_raw
+    else:
+        image=image_raw
+        v=skimage.img_as_ubyte(color.rgb2hsv(image_raw))[:,:,2]
+    
+
+    # Filtering noise
+    #Will change type!
+    dv = rank.median(v, disk(fd))
+    #Expanding 
+    #comb = opening(dv, selem=disk(od))
+    
+    comb=skimage.img_as_float(dv)
+    
+    imagef=skimage.img_as_ubyte(comb)
+    
+    total=comb.shape[0]*comb.shape[1]
+    wsize=total
+    wsizeo=total
+    
+    vthri=vmin
+    step=0.001
+    wdiff=abs(wgoal-wsize)
+    wdiffo=abs(wgoal-wsize)
+    
+    iter=0
+
+    while wdiff<=wdiffo and iter<100 and vthri<0.06:
+        vthrio=vthri
+        vthri+=step
+
+        wdiffo=wdiff
+        wsize=np.count_nonzero(comb[comb > vthri])
+
+        wdiff=abs(wsize-wgoal)
+
+        imgprc=np.float(np.sum(comb > vthri)*100)/total
+        #print("Threshold: {:.4f}, Worm size: {:d}, Wdiff: {:d} Image covered: {:.2f}%".format(vthri,wsize,wdiff,imgprc))
+        iter += 1
+
+
+    #umarks=np.unique(markers)
+    markers = np.zeros_like(comb)
+    markers[comb > vthrio] = 2
+    markers[comb ==0] = 1
+
+
+    
+    labeled_worms,worms=waterseg(markers,sd,blobsize,maxsize)
+    
+    results_data=getresults(image,labeled_worms)
+
+    #Data collection step
+    #In Velocity background is summed in only one channel!
+    q.put(fln)
+    
+    return [fln,imagef,labeled_worms,results_data]
+
+
+def waterseg(markers,sd,blobsize,maxsize):
+    
+    distance = ndi.distance_transform_edt(markers)
+    local_maxi = peak_local_max(distance, indices=False, footprint=np.ones((3, 3)),
+                                labels=markers)
+    markersmaxi = ndi.label(local_maxi)[0]
+    segmentation = watershed(distance, markersmaxi, mask=markers)
+    segmentation_fill = ndi.binary_fill_holes(segmentation)
+    labeled_worms, _ = ndi.label(segmentation_fill)
+
+    
+    for w in list(np.unique(labeled_worms)):
+        # print labeled_worms[labeled_worms==w].shape[0]
+        if labeled_worms[labeled_worms == w].shape[0] < blobsize:
+            labeled_worms[labeled_worms == w] = 0
+
+    #Smoother worms
+    labeled_worms = opening(labeled_worms, selem=disk(sd)).astype('uint8')
+    
+    
+    wormind = list(np.unique(labeled_worms))
+    worms = {w: labeled_worms[labeled_worms == w].shape[0] for w in wormind}
+    worms = {wk: wp for wk, wp in worms.items() if wp < maxsize}
+    
+    #contours = measure.find_contours(labeled_worms, 0.8)
+    
+    return (labeled_worms,worms)
+
+
+def getresults(image,labeled_worms):
+    b_sz=np.sum(np.isin(labeled_worms,0))
+    b_sum=np.sum(image[labeled_worms==0,0])
+    b_mean=b_sum/b_sz
+
+    wormind=[win for win in list(np.unique(labeled_worms)) if win!=0]
+
+    if len(wormind)>0:
+        results_data=[]
+        for w in wormind:
+            w_sz=np.sum(np.isin(labeled_worms, w))
+            #In Velocity worm outline is summed in all 3 channels!
+            w_sum=np.sum(image[labeled_worms==w,:])
+            w_mean=w_sum/w_sz
+            results_data.append([w,w_sz,w_sum,w_mean,b_sz,b_sum,b_mean])
+    else:
+        results_data=[[]]
+
+    return results_data
+
+
+
 def plotcontours(image,ax,labeled_worms=False,title="",plotcontour=True,plotlabels=True,white=True,ylabel="",xlabel=""):
 
     plt.sca(ax)
+    if image.dtype=='uint8':
+        vmax=255
+    else:
+        vmax=1
+        
     if white:
         extract = image.copy()
-        extract[labeled_worms == 0, :] = [1, 1, 1]
+        if np.ndim(extract)==2:
+            extract[labeled_worms == 0] = vmax
+        else:
+            extract[labeled_worms == 0, :] = [vmax,vmax,vmax]
     else:
         extract = image
 
@@ -402,13 +667,14 @@ def plotcontours(image,ax,labeled_worms=False,title="",plotcontour=True,plotlabe
             minr, minc, maxr, maxc = region.bbox
             plt.text(maxc, maxr, region.label)
 
+            
 def jetimage(image,typeadjust=True):
     image_rescale=exposure.rescale_intensity(image)
     cmap =plt.get_cmap('jet')
     image_rgb = cmap(image_rescale)
     
     if typeadjust:
-        image_rgb = skimage.img_as_ubyte(np.delete(image_rgb, 3, 2))
+        image_rgb = np.delete(image_rgb, 3, 2).astype('uint8')
     
     return image_rgb
 
