@@ -40,6 +40,8 @@ from skimage import exposure
 import datetime
 from multiprocessing import Pool, Manager
 
+import cPickle
+
 
 
 from skimage.filters import rank
@@ -211,13 +213,16 @@ def readdel(ifile):
 
 
 
-def wormdel(img, worms):
-	for worm in delworms:
-		x1, y1, x2, y2 = worm
-		xs = [x1, x2]
-		ys = [y1, y2]
-		img[min(ys):max(ys), min(xs):max(xs), :] = 0
-	return img
+def wormdel(img, delworms):
+    for worm in delworms:
+        x1, y1, x2, y2 = worm
+        xs = [x1, x2]
+        ys = [y1, y2]
+        if np.ndim(img)==2:
+            img[min(ys):max(ys), min(xs):max(xs)] = 0
+        else:
+            img[min(ys):max(ys), min(xs):max(xs), :] = 0
+    return img
 
 
 def readman(ifile):
@@ -401,30 +406,54 @@ def multiprocessor(cores,func,args,nargs=0):
     #print results
     return results
 
-
-def collector_M((fln,settings,q),saveRGB=False,colordepth='uint8'):
+def collector_M((fln,settings,q),savetype='BW',colordepth='uint8'):
     
     for key,val in settings.items():
         exec(key + '=val')
     
     image = tiff.imread(fln)
     #Save only one layer, as they are redundant
-   
+    if np.ndim(image)>3:
+        raise ValueError('Tiff image has more than 3 dimensions!')
     if np.ndim(image)==3:
-        if saveRGB:
+        if image.shape[2]>3:
+            raise ValueError('Tiff image has more than 3 layers!')
+            
+
+    if savetype=='RGB':
+        if np.ndim(image)==3:
             imagesave=image
-        elif np.sum(image[:,:,0]-image[:,:,1])==0 and np.sum(image[:,:,1]-image[:,:,2])==0:
-            imagesave=image[:,:,0]
         else:
-            imagesave=color.rgb2hsv(image)[:,:,2]
-    elif np.ndim(image)==2:
-        if saveRGB:
             imagesave=color.gray2rgb(image)
+            
+    elif savetype=='BW':
+        if np.ndim(image)==3:
+            if np.sum(image[:,:,0]-image[:,:,1])==0 and np.sum(image[:,:,1]-image[:,:,2])==0:
+                imagesave=image[:,:,0]
+            else:
+                imagesave=color.rgb2hsv(image)[:,:,2]
         else:
             imagesave=image
+            
+    elif savetype=='HV':
+        if np.ndim(image)==3:
+            imagesave=color.rgb2hsv(image)[:,:,(0,2)].astype('float16')
+        else:
+            v=color.rgb2hsv(color.gray2rgb(image))[:,:,2].astype('float16')
+            h=np.zeros_like(v).astype('float16')
+            imagesave=np.stack([h,v],axis=2)
+     
+    elif savetype=='HSV':
+        if np.ndim(image)==3:
+            imagesave=color.rgb2hsv(image).astype('float16')
+        else:
+            v=color.rgb2hsv(color.gray2rgb(image))[:,:,2].astype('float16')
+            h=np.zeros_like(v).astype('float16')
+            imagesave=np.stack([h,h,v],axis=2)
     else:
-        raise ValueError('Tiff image has more than 3 layers!')
-           
+        imagesave=image
+            
+
     if imagesave.dtype!=colordepth:
         if colordepth=='uint8':
             imagesave=skimage.img_as_ubyte(imagesave)
@@ -440,6 +469,38 @@ def collector_M((fln,settings,q),saveRGB=False,colordepth='uint8'):
     q.put(fln)
     
     return [fln,imagesave]
+
+def collectsubset(ofile,imagesets,imagesindex,size=100):
+    
+    oimagest="{}.pkl".format(ofile)
+    rndsel=np.random.choice(range(0,imagesets[0].shape[0]-1), size, replace=False)
+
+    imagesets_ar=[]
+    imagesindex_f={ ik:ival for ik,ival in imagesindex.items() if ival in rndsel }
+    
+    
+    #print len(rndsel), len(imagesindex_f)
+
+    imagesindex_t={ik:ii for ii,(ik,ival) in enumerate(imagesindex_f.items())}
+    
+    for iset in imagesets:
+        isetdata=[]
+        for ik,ival in imagesindex_f.items():
+            isetdata.append(iset[ival])
+        imagesets_ar.append(isetdata)
+
+
+    print "Stacking..."
+    imagesets_s=tuple([np.stack(iset, axis=0) for iset in imagesets_ar])
+    iwrite=(imagesindex_t,)+imagesets_s
+    f = open(oimagest, "w")
+    print "Writing..."
+    cPickle.dump(iwrite, f)
+    f.close()
+    print "Zipping..."
+    os.system("gzip -f {}".format(oimagest))
+    print("Saving images complete!")
+
 
 
 
@@ -496,7 +557,7 @@ def labeller4_M((fln, image_raw, settings,q), vmin=0.04, vmax=0.06, step=0.001, 
     markers[comb > vthrio] = 2
     markers[comb == 0] = 1
 
-    labeled_worms,worms=waterseg(markers,sd,blobsize,maxsize)
+    labeled_worms=waterseg(markers,sd,blobsize,maxsize)
     
     #Data collection step
     #In Velocity background is summed in only one channel!
@@ -518,9 +579,18 @@ def labeller5_M((fln,image_raw,settings,q), wgoal=60000, vmin=0.04, vmax=0.06, s
     if np.ndim(image_raw)==2:
         image=color.gray2rgb(image_raw)
         v=image_raw
+    elif np.ndim(image_raw)>3:
+        raise ValueError('Tiff image has more than 3 dimensions!')
     else:
-        image=image_raw
-        v=skimage.img_as_ubyte(color.rgb2hsv(image_raw))[:,:,2]
+        if image_raw.shape[2]==3:
+            image=image_raw
+            v=skimage.img_as_ubyte(color.rgb2hsv(image_raw))[:,:,2]
+        elif image_raw.shape[2]==2:
+            image=image_raw[:,:,1]
+            v=skimage.img_as_ubyte(image)
+        else:
+            raise ValueError('Tiff image has more than 3 layers!')
+        
     
     # Filtering noise
     #Will change type!
@@ -562,7 +632,7 @@ def labeller5_M((fln,image_raw,settings,q), wgoal=60000, vmin=0.04, vmax=0.06, s
     markers[comb > vthrio] = 2
     markers[comb ==0] = 1
 
-    labeled_worms,worms=waterseg(markers,sd,blobsize,maxsize)
+    labeled_worms=waterseg(markers,sd,blobsize)
     
     results_data=getresults(image,labeled_worms)
 
@@ -573,33 +643,71 @@ def labeller5_M((fln,image_raw,settings,q), wgoal=60000, vmin=0.04, vmax=0.06, s
     return [fln,imagef,labeled_worms,results_data]
 
 
-def waterseg(markers,sd,blobsize,maxsize):
-    
-    distance = ndi.distance_transform_edt(markers)
-    local_maxi = peak_local_max(distance, indices=False, footprint=np.ones((3, 3)),
-                                labels=markers)
-    markersmaxi = ndi.label(local_maxi)[0]
-    segmentation = watershed(distance, markersmaxi, mask=markers)
-    segmentation_fill = ndi.binary_fill_holes(segmentation)
-    labeled_worms, _ = ndi.label(segmentation_fill)
+#def waterseg(markers,sd,blobsize,maxsize):
+#    
+#    distance = ndi.distance_transform_edt(markers)
+#    local_maxi = peak_local_max(distance, indices=False, footprint=np.ones((3, 3)),
+#                                labels=markers)
+#    markersmaxi = ndi.label(local_maxi)[0]
+#    segmentation = watershed(distance, markersmaxi, mask=markers)
+#    segmentation_fill = ndi.binary_fill_holes(segmentation)
+#    labeled_worms, _ = ndi.label(segmentation_fill)
+#
+#    #Filter out noise and patches
+#    for w in list(np.unique(labeled_worms)):
+#        # print labeled_worms[labeled_worms==w].shape[0]
+#        if labeled_worms[labeled_worms == w].shape[0] < blobsize:
+#            labeled_worms[labeled_worms == w] = 0
+#            
+#    #Smoother worms
+#    labeled_worms = opening(labeled_worms, selem=disk(sd)).astype('uint8')
+#    
+#    return (labeled_worms)
 
+def waterseg(markers,sd,blobsize,approach="TF"):
+
+    if approach=='Biolog':
+        #Old approach is wrong
+        elevation_map = sobel(v)
+        segmentation = watershed(elevation_map, markers)
+        segmentation = ndi.binary_fill_holes(segmentation - 1)
+        labeled_worms, _ = ndi.label(segmentation)
+    else:
+        distance = ndi.distance_transform_edt(markers)
+        local_maxi = peak_local_max(distance, indices=False, footprint=np.ones((3, 3)),
+                                    labels=markers)
+        markersmaxi = ndi.label(local_maxi)[0]
+        segmentation = watershed(distance, markersmaxi, mask=markers)
+        segmentation_fill = ndi.binary_fill_holes(segmentation)
+        labeled_worms, _ = ndi.label(segmentation_fill)
     
+        
+    #Filter out noise and patches
     for w in list(np.unique(labeled_worms)):
         # print labeled_worms[labeled_worms==w].shape[0]
         if labeled_worms[labeled_worms == w].shape[0] < blobsize:
             labeled_worms[labeled_worms == w] = 0
-
+        
     #Smoother worms
-    labeled_worms = opening(labeled_worms, selem=disk(sd)).astype('uint8')
+    labeled_worms = skimage.img_as_ubyte(opening(labeled_worms, selem=disk(sd)))
+
+    return labeled_worms
+
+def getdistributions(layer,labeled_worms,levels):
     
-    
-    wormind = list(np.unique(labeled_worms))
-    worms = {w: labeled_worms[labeled_worms == w].shape[0] for w in wormind}
-    worms = {wk: wp for wk, wp in worms.items() if wp < maxsize}
-    
-    #contours = measure.find_contours(labeled_worms, 0.8)
-    
-    return (labeled_worms,worms)
+    wormind=[win for win in list(np.unique(labeled_worms)) if win!=0]
+    if len(wormind)>0:
+        results_data=[]
+        for w in wormind:
+            bright1D = np.around(layer[labeled_worms == w].ravel(), 3)
+            ftable = np.array(freqtable(bright1D))
+            ftable = ftable[np.argsort(ftable[:, 0])]
+            fdict = {"{0:.3f}".format(freq[0]): int(freq[1]) for freq in ftable}
+            data.append([w]+[fdict[key] if key in fdict.keys() else 0 for key in levels])
+    else:
+        results_data=[[]]
+
+    return results_data
 
 
 def getresults(image,labeled_worms):
@@ -676,13 +784,14 @@ def plotcontours(image,ax,labeled_worms=False,title="",plotcontour=True,plotlabe
 
             
 def jetimage(image,typeadjust=True):
+    
     image_rescale=exposure.rescale_intensity(image)
     cmap =plt.get_cmap('jet')
     image_rgb = cmap(image_rescale)
     
     if typeadjust:
-        image_rgb = np.delete(image_rgb, 3, 2).astype('uint8')
-    
+        image_rgb = skimage.img_as_ubyte(np.delete(image_rgb, 3, 2))
+        
     return image_rgb
 
 def map2table(data):
