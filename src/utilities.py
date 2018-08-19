@@ -147,10 +147,17 @@ def readTF(ifile):
         flin=row['FileInd']
         fl=row['File']
         gmax=row['Max']
-        TFs[gene][rep][tp][fld]['ByFNO'][flno] = fl
-        TFs[gene][rep][tp][fld]['ByFIN'][flin] = fl
-        if not 'Max' in TFs[gene].keys():
-            TFs[gene]['Max']=gmax
+        if "Dataset" in headers:
+            dataset=row['Dataset']
+            TFs[dataset][gene][rep][tp][fld]['ByFNO'][flno] = fl
+            TFs[dataset][gene][rep][tp][fld]['ByFIN'][flin] = fl
+            if not 'Max' in TFs[dataset][gene].keys():
+                TFs[dataset][gene]['Max']=gmax
+        else:
+            TFs[gene][rep][tp][fld]['ByFNO'][flno] = fl
+            TFs[gene][rep][tp][fld]['ByFIN'][flin] = fl
+            if not 'Max' in TFs[gene].keys():
+                TFs[gene]['Max']=gmax
         
     return TFs
 
